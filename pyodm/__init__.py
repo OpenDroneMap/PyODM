@@ -6,7 +6,7 @@ Simple usage:
    >>> from pyodm import Node
    >>> # TODO MORE EXAMPLE
    >>> print("HELLO")
-   "HELLO"
+   HELLO
 
 License: BSD 3-Clause, see LICENSE for more details.
 

@@ -11,7 +11,8 @@ from urllib.parse import urlunparse, urlencode, urlparse, parse_qs
 
 import simplejson
 
-from pyodm.exceptions import NodeConnectionError, TaskResponseError, NodeServerError
+from pyodm.types import NodeOption
+from .exceptions import NodeConnectionError, TaskResponseError, NodeServerError
 from .utils import MultipartEncoder
 from requests_toolbelt.multipart import encoder
 
@@ -83,28 +84,52 @@ class Node:
             raise NodeConnectionError(str(e))
 
     def info(self):
+        """Retrieve information about this node.
+
+        >>> n = Node('localhost', 3000)
+        >>> n.info()['taskQueueCount']
+        0
+        >>> list(n.info())
+        ['version', 'taskQueueCount', 'totalMemory', 'availableMemory', 'cpuCores', 'maxImages', 'maxParallelTasks', 'odmVersion']
+
+        Returns:
+            dict: Information about this node
+        """
         return self.get('/info')
 
     def options(self):
-        return self.get('/options')
+        """Retrieve the options available for creating new tasks on this node.
 
-    def create_task(self, files, name=None, options=[], upload_progress_callback=None):
+        >>> n = Node('localhost', 3000)
+        >>> n.options()[0].name
+        'pc-classify'
+        >>> n.options()[0].domain
+        ['none', 'smrf', 'pmf']
+
+        Returns:
+            list: [:func:`~pyodm.types.NodeOption`]
+        """
+        return list(map(lambda o: NodeOption(**o), self.get('/options')))
+
+    def create_task(self, files, name=None, options={}, upload_progress_callback=None):
         """Start processing a new task.
         At a minimum you need to pass a list of image paths. All other parameters are optional.
 
         Args:
             files (list): list of image paths + optional GCP file path.
             name (str): name for the task
-            options (list): TBD
+            options (dict): options to use, for example {'orthophoto-resolution': 3, ...}
             upload_progress_callback (function): callback reporting upload progress (as a percentage)
 
         Returns:
             :func:`~Task`
         """
 
+        options_list = [{'name': k, 'value': v} for k, v in options]
+
         fields = {
             'name': name,
-            'options': json.dumps(options),
+            'options': json.dumps(options_list),
             'images': [(os.path.basename(f), read_file(f), (mimetypes.guess_type(f)[0] or "image/jpg")) for
                        f in files]
         }
@@ -179,5 +204,3 @@ class Task:
             return res.json()
         else:
             return res
-
-
