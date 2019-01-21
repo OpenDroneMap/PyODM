@@ -11,8 +11,8 @@ from urllib.parse import urlunparse, urlencode, urlparse, parse_qs
 
 import simplejson
 
-from pyodm.types import NodeOption
-from .exceptions import NodeConnectionError, TaskResponseError, NodeServerError
+from pyodm.types import NodeOption, NodeInfo, TaskInfo
+from .exceptions import NodeConnectionError, NodeResponseError, NodeServerError
 from .utils import MultipartEncoder
 from requests_toolbelt.multipart import encoder
 
@@ -45,7 +45,7 @@ class Node:
             :func:`~Node`
         """
         u = urlparse(url)
-        qs = parse_qs(url.query)
+        qs = parse_qs(u.query)
 
         port = u.port
         if port is None:
@@ -87,15 +87,13 @@ class Node:
         """Retrieve information about this node.
 
         >>> n = Node('localhost', 3000)
-        >>> n.info()['taskQueueCount']
-        0
-        >>> list(n.info())
-        ['version', 'taskQueueCount', 'totalMemory', 'availableMemory', 'cpuCores', 'maxImages', 'maxParallelTasks', 'odmVersion']
+        >>> n.info().version
+        '1.3.1'
 
         Returns:
-            dict: Information about this node
+            :func:`~pyodm.types.NodeInfo`
         """
-        return self.get('/info')
+        return NodeInfo(self.get('/info'))
 
     def options(self):
         """Retrieve the options available for creating new tasks on this node.
@@ -111,21 +109,39 @@ class Node:
         """
         return list(map(lambda o: NodeOption(**o), self.get('/options')))
 
-    def create_task(self, files, name=None, options={}, upload_progress_callback=None):
+    def create_task(self, files, options={}, name=None, upload_progress_callback=None):
         """Start processing a new task.
         At a minimum you need to pass a list of image paths. All other parameters are optional.
 
+        >>> n = Node('localhost', 3000)
+        >>> t = n.create_task(['examples/images/tiny_image_1.jpg', 'examples/images/tiny_image_2.jpg'], \
+                          {'orthophoto-resolution': 2, 'dsm': True})
+        >>> info = t.info()
+        >>> info.status
+        <TaskStatus.RUNNING: 20>
+        >>> t.info().images_count
+        2
+
         Args:
             files (list): list of image paths + optional GCP file path.
-            name (str): name for the task
             options (dict): options to use, for example {'orthophoto-resolution': 3, ...}
+            name (str): name for the task
             upload_progress_callback (function): callback reporting upload progress (as a percentage)
 
         Returns:
             :func:`~Task`
         """
+        if len(files) == 0:
+            raise NodeResponseError("Not enough images")
 
-        options_list = [{'name': k, 'value': v} for k, v in options]
+        options_list = [{'name': k, 'value': options[k]} for k in options]
+
+        # Equivalent as passing the open file descriptor, since requests
+        # eventually calls read(), but this way we make sure to close
+        # the file prior to reading the next, so we don't run into open file OS limits
+        def read_file(file_path):
+            with open(file_path, 'rb') as f:
+                return f.read()
 
         fields = {
             'name': name,
@@ -158,9 +174,22 @@ class Node:
         if 'uuid' in result:
             return Task(self, result['uuid'])
         elif 'error' in result:
-            raise TaskResponseError(result['error'])
+            raise NodeResponseError(result['error'])
         else:
             raise NodeServerError('Invalid response: ' + str(result))
+
+    def get_task(self, uuid):
+        """Helper method to initialize a task from an existing UUID
+
+        >>> n = Node("localhost", 3000)
+        >>> t = n.get_task('00000000-0000-0000-0000-000000000000')
+        >>> t.__class__
+        <class 'pyodm.api.Task'>
+
+        Args:
+            uuid: Unique identifier of the task
+        """
+        return Task(self, uuid)
 
 class Task:
     """A task is created to process images. To create a task, use :func:`~Node.create_task`.
@@ -178,11 +207,16 @@ class Task:
     def get(self, url, query = {}):
         result = self.node.get(url, query)
         if 'error' in result:
-            raise TaskResponseError(result['error'])
+            raise NodeResponseError(result['error'])
         return result
 
-    def info(self, uuid):
-        return self.get('/task/{}/info'.format(uuid))
+    def info(self):
+        """Retrieves information about this task.
+
+        Returns:
+            :func:`~pyodm.types.TaskInfo`
+        """
+        return TaskInfo(self.get('/task/{}/info'.format(self.uuid)))
 
     def output(self, uuid, line=0):
         return self.get('/task/{}/output'.format(uuid), {'line': line})

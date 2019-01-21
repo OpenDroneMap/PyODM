@@ -25,7 +25,8 @@ class MultipartEncoder(encoder.MultipartEncoder):
                 for f in field:
                     yield next(cls._iter_field(field_name, f))
                 else:
-                    raise StopIteration()
+                    return
+
             if len(field) == 2:
                 file_name, file_pointer = field
             elif len(field) == 3:

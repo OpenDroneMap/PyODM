@@ -7,5 +7,5 @@ class NodeServerError(OdmError):
 class NodeConnectionError(OdmError):
     pass
 
-class TaskResponseError(OdmError):
+class NodeResponseError(OdmError):
     pass
