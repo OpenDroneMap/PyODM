@@ -20,8 +20,8 @@ sys.path.insert(0, os.path.abspath('..'))
 # -- Project information -----------------------------------------------------
 
 project = 'PyODM'
-copyright = '2019, Piero Toffanin'
-author = 'Piero Toffanin'
+copyright = '2019, OpenDroneMap Contributors'
+author = 'OpenDroneMap Contributors'
 
 # The short X.Y version
 version = ''
@@ -132,7 +132,7 @@ latex_elements = {
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
     (master_doc, 'PyODM.tex', 'PyODM Documentation',
-     'Piero Toffanin', 'manual'),
+     'OpenDroneMap Contributors', 'manual'),
 ]
 
 
