@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pyodm",
-    version="0.1.0",
+    version="1.3.1",
     author="OpenDroneMap Contributors",
     author_email="pt@masseranolabs.com",
     description="Python SDK for OpenDroneMap",
@@ -15,11 +15,12 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: BSD-3-Clause",
+        "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
     ],
     install_requires=[
         'requests',
         'requests_toolbelt',
+        'urllib3',
     ]
 )
