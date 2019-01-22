@@ -56,7 +56,7 @@ class TaskInfo(JsonResponse):
         processing_time (int): Milliseconds that have elapsed since the start of processing, or -1 if no information is available.
         status (:func:`pyodm.types.TaskStatus`): status (running, queued, etc.)
         options (dict): options used for this task
-        imagesCount (int): Number of images (+ GCP file)
+        images_count (int): Number of images (+ GCP file)
     """
     def __init__(self, json):
         self.uuid = json['uuid']

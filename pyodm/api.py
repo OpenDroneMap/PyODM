@@ -10,7 +10,10 @@ import json
 import os
 from urllib.parse import urlunparse, urlencode, urlparse, parse_qs
 
-import simplejson
+try:
+    import simplejson as json
+except ImportError:
+    import json
 import time
 
 from urllib3.exceptions import ReadTimeoutError
@@ -93,7 +96,7 @@ class Node:
                 return res.json()
             else:
                 return res
-        except (json.decoder.JSONDecodeError, simplejson.JSONDecodeError) as e:
+        except json.decoder.JSONDecodeError as e:
             raise NodeServerError(str(e))
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             raise NodeConnectionError(str(e))
@@ -111,7 +114,7 @@ class Node:
                 return res.json()
             else:
                 return res
-        except (json.decoder.JSONDecodeError, simplejson.JSONDecodeError) as e:
+        except json.decoder.JSONDecodeError as e:
             raise NodeServerError(str(e))
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             raise NodeConnectionError(str(e))

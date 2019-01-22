@@ -18,4 +18,8 @@ setuptools.setup(
         "License :: OSI Approved :: BSD-3-Clause",
         "Operating System :: OS Independent",
     ],
+    install_requires=[
+        'requests',
+        'requests_toolbelt',
+    ]
 )
