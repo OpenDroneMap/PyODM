@@ -1,6 +1,8 @@
 # PyODM
 
-For documentation, please visit 
+For the latest documentation visit: https://pyodm.readthedocs.io
+
+The information below is for managing the repository.
 
 ## Running Tests
 
