@@ -264,10 +264,7 @@ class Task:
         """Retrieve console task output.
 
         Args:
-            line (int): Optional line number that the console output should be truncated from.
-            For example, passing a value of 100 will retrieve the console output starting from
-            line 100. Negative numbers are also allowed. For example -50 will retrieve the last
-            50 lines of console output. Defaults to 0 (retrieve all console output).
+            line (int): Optional line number that the console output should be truncated from. For example, passing a value of 100 will retrieve the console output starting from line 100. Negative numbers are also allowed. For example -50 will retrieve the last 50 lines of console output. Defaults to 0 (retrieve all console output).
 
         Returns:
             [str]: console output (one list item per row).
