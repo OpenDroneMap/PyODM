@@ -2,6 +2,7 @@
 API
 ======
 """
+import zipfile
 
 import requests
 import mimetypes
@@ -10,10 +11,13 @@ import os
 from urllib.parse import urlunparse, urlencode, urlparse, parse_qs
 
 import simplejson
+import time
 
-from pyodm.types import NodeOption, NodeInfo, TaskInfo
-from .exceptions import NodeConnectionError, NodeResponseError, NodeServerError
-from .utils import MultipartEncoder
+from urllib3.exceptions import ReadTimeoutError
+
+from pyodm.types import NodeOption, NodeInfo, TaskInfo, TaskStatus
+from .exceptions import NodeConnectionError, NodeResponseError, NodeServerError, TaskFailedError
+from .utils import MultipartEncoder, options_to_json
 from requests_toolbelt.multipart import encoder
 
 
@@ -36,6 +40,8 @@ class Node:
     @staticmethod
     def from_url(url, timeout=30):
         """Create a Node instance from a URL.
+
+        >>> n = Node.from_url("http://localhost:3000?token=abc")
 
         Args:
             url (str): URL in the format proto://hostname:port/?token=value
@@ -75,13 +81,41 @@ class Node:
 
         return urlunparse((proto, netloc, url, '', urlencode(query), ''))
 
-    def get(self, url, query={}):
+    def get(self, url, query={}, **kwargs):
         try:
-            return requests.get(self.url(url, query), timeout=self.timeout).json()
+            res = requests.get(self.url(url, query), timeout=self.timeout, **kwargs)
+            if res.status_code == 401:
+                raise NodeResponseError("Unauthorized. Do you need to set a token?")
+            elif res.status_code != 200 and res.status_code != 403:
+                raise NodeServerError(res.status_code)
+
+            if "Content-Type" in res.headers and "application/json" in res.headers['Content-Type']:
+                return res.json()
+            else:
+                return res
         except (json.decoder.JSONDecodeError, simplejson.JSONDecodeError) as e:
             raise NodeServerError(str(e))
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             raise NodeConnectionError(str(e))
+
+    def post(self, url, data, headers={}):
+        try:
+            res = requests.post(self.url(url), data=data, headers=headers, timeout=self.timeout)
+
+            if res.status_code == 401:
+                raise NodeResponseError("Unauthorized. Do you need to set a token?")
+            elif res.status_code != 200 and res.status_code != 403:
+                raise NodeServerError(res.status_code)
+
+            if "Content-Type" in res.headers and "application/json" in res.headers['Content-Type']:
+                return res.json()
+            else:
+                return res
+        except (json.decoder.JSONDecodeError, simplejson.JSONDecodeError) as e:
+            raise NodeServerError(str(e))
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            raise NodeConnectionError(str(e))
+
 
     def info(self):
         """Retrieve information about this node.
@@ -109,32 +143,33 @@ class Node:
         """
         return list(map(lambda o: NodeOption(**o), self.get('/options')))
 
-    def create_task(self, files, options={}, name=None, upload_progress_callback=None):
+    def create_task(self, files, options={}, name=None, progress_callback=None):
         """Start processing a new task.
         At a minimum you need to pass a list of image paths. All other parameters are optional.
 
         >>> n = Node('localhost', 3000)
-        >>> t = n.create_task(['examples/images/tiny_image_1.jpg', 'examples/images/tiny_image_2.jpg'], \
+        >>> t = n.create_task(['examples/images/image_1.jpg', 'examples/images/image_2.jpg'], \
                           {'orthophoto-resolution': 2, 'dsm': True})
         >>> info = t.info()
         >>> info.status
         <TaskStatus.RUNNING: 20>
         >>> t.info().images_count
         2
+        >>> t.output()[0:2]
+        ['DJI_0131.JPG - DJI_0313.JPG has 1 candidate matches', 'DJI_0131.JPG - DJI_0177.JPG has 3 candidate matches']
+
 
         Args:
             files (list): list of image paths + optional GCP file path.
             options (dict): options to use, for example {'orthophoto-resolution': 3, ...}
             name (str): name for the task
-            upload_progress_callback (function): callback reporting upload progress (as a percentage)
+            progress_callback (function): callback reporting upload progress percentage
 
         Returns:
             :func:`~Task`
         """
         if len(files) == 0:
             raise NodeResponseError("Not enough images")
-
-        options_list = [{'name': k, 'value': options[k]} for k in options]
 
         # Equivalent as passing the open file descriptor, since requests
         # eventually calls read(), but this way we make sure to close
@@ -145,7 +180,7 @@ class Node:
 
         fields = {
             'name': name,
-            'options': json.dumps(options_list),
+            'options': options_to_json(options),
             'images': [(os.path.basename(f), read_file(f), (mimetypes.guess_type(f)[0] or "image/jpg")) for
                        f in files]
         }
@@ -154,8 +189,8 @@ class Node:
             total_bytes = mpe.len
 
             def callback(monitor):
-                if upload_progress_callback is not None and total_bytes > 0:
-                    upload_progress_callback(monitor.bytes_read / total_bytes)
+                if progress_callback is not None and total_bytes > 0:
+                    progress_callback(100.0 * monitor.bytes_read / total_bytes)
 
             return callback
 
@@ -163,9 +198,7 @@ class Node:
         m = encoder.MultipartEncoderMonitor(e, create_callback(e))
 
         try:
-            result = requests.post(self.url("/task/new"),
-                                 data=m,
-                                 headers={'Content-Type': m.content_type}).json()
+            result = self.post('/task/new', data=m, headers={'Content-Type': m.content_type})
         except (json.decoder.JSONDecodeError, simplejson.JSONDecodeError) as e:
             raise NodeServerError(str(e))
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
@@ -204,9 +237,15 @@ class Task:
         self.uuid = uuid
 
 
-    def get(self, url, query = {}):
-        result = self.node.get(url, query)
-        if 'error' in result:
+    def get(self, url, query = {}, **kwargs):
+        result = self.node.get(url, query, **kwargs)
+        if isinstance(result, dict) and 'error' in result:
+            raise NodeResponseError(result['error'])
+        return result
+
+    def post(self, url, data):
+        result = self.node.post(url, data)
+        if isinstance(result, dict) and 'error' in result:
             raise NodeResponseError(result['error'])
         return result
 
@@ -218,23 +257,123 @@ class Task:
         """
         return TaskInfo(self.get('/task/{}/info'.format(self.uuid)))
 
-    def output(self, uuid, line=0):
-        return self.get('/task/{}/output'.format(uuid), {'line': line})
+    def output(self, line=0):
+        """Retrieve console task output.
 
-    def task_cancel(self, uuid):
-        return requests.post(self.url('/task/cancel'), data={'uuid': uuid}, timeout=self.timeout).json()
+        Args:
+            line (int): Optional line number that the console output should be truncated from.
+            For example, passing a value of 100 will retrieve the console output starting from
+            line 100. Negative numbers are also allowed. For example -50 will retrieve the last
+            50 lines of console output. Defaults to 0 (retrieve all console output).
 
-    def task_remove(self, uuid):
-        return requests.post(self.url('/task/remove'), data={'uuid': uuid}, timeout=self.timeout).json()
+        Returns:
+            [str]: console output (one list item per row).
+        """
+        return self.get('/task/{}/output'.format(self.uuid), {'line': line})
 
-    def task_restart(self, uuid, options=None):
-        data = {'uuid': uuid}
-        if options is not None: data['options'] = json.dumps(options)
-        return requests.post(self.url('/task/restart'), data=data, timeout=self.timeout).json()
+    def cancel(self):
+        """Cancel this task.
 
-    def task_download(self, uuid, asset):
-        res = requests.get(self.url('/task/{}/download/{}').format(uuid, asset), stream=True, timeout=self.timeout)
-        if "Content-Type" in res.headers and "application/json" in res.headers['Content-Type']:
-            return res.json()
-        else:
-            return res
+        Returns:
+            bool: task was canceled or not
+        """
+        return getattr(self.post('/task/cancel', {'uuid': self.uuid}), 'success', False)
+
+    def remove(self):
+        """Remove this task.
+
+        Returns:
+            bool: task was removed or not
+        """
+        return getattr(self.post('/task/remove', {'uuid': self.uuid}), 'success', False)
+
+    def restart(self, options=None):
+        """Restart this task.
+
+        Args:
+            options (dict): options to use, for example {'orthophoto-resolution': 3, ...}
+
+        Returns:
+            bool: task was restarted or not
+        """
+        data = {'uuid': self.uuid}
+        if options is not None: data['options'] = options_to_json(options)
+        return getattr(self.post('/task/restart', data), 'success', False)
+
+    def download_zip(self, destination, progress_callback=None):
+        """Download this task's assets archive to a directory.
+
+        Args:
+            destination (str): directory where to download assets archive. If the directory does not exist, it will be created.
+            progress_callback (function): an optional callback with one parameter, the download progress percentage
+        Returns:
+            str: path to archive file (.zip)
+        """
+        info = self.info()
+        if info.status != TaskStatus.COMPLETED:
+            raise NodeResponseError("Cannot download task, task status is " + str(info.status))
+
+        if not os.path.exists(destination):
+            os.makedirs(destination, exist_ok=True)
+
+        try:
+            download_stream = self.get('/task/{}/download/all.zip'.format(self.uuid), stream=True)
+            zip_path = os.path.join(destination, "{}_{}_all.zip".format(self.uuid, int(time.time())))
+
+            # Keep track of download progress (if possible)
+            content_length = download_stream.headers.get('content-length')
+            total_length = int(content_length) if content_length is not None else None
+            downloaded = 0
+
+            with open(zip_path, 'wb') as fd:
+
+                for chunk in download_stream.iter_content(4096):
+                    downloaded += len(chunk)
+
+                    if progress_callback is not None:
+                        progress_callback((100.0 * float(downloaded) / total_length))
+
+                    fd.write(chunk)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, ReadTimeoutError) as e:
+            raise NodeConnectionError(e)
+
+        return zip_path
+
+    def download_assets(self, destination, progress_callback=None):
+        """Download this task's assets to a directory.
+
+        Args:
+            destination (str): directory where to download assets. If the directory does not exist, it will be created.
+            progress_callback (function): an optional callback with one parameter, the download progress percentage
+        Returns:
+            str: path to saved assets
+        """
+        zip_path = self.download_zip(destination, progress_callback=progress_callback)
+        with zipfile.ZipFile(zip_path, "r") as zip_h:
+            zip_h.extractall(destination)
+            os.remove(zip_path)
+
+        return destination
+
+    def wait_for_completion(self, status_callback=None, interval=3):
+        """Wait for the task to complete. The call will block until the task status has become
+        :func:`~TaskStatus.COMPLETED`. If the status is set to :func:`~TaskStatus.CANCELED` or :func:`~TaskStatus.FAILED`
+        it raises a TaskFailedError exception.
+
+        Args:
+            status_callback (function): optional callback that will be called with task info updates every interval seconds.
+            interval (int): seconds between status checks.
+        """
+        while True:
+            info = self.info()
+
+            if status_callback is not None:
+                status_callback(info)
+
+            if info.status in [TaskStatus.COMPLETED, TaskStatus.CANCELED, TaskStatus.FAILED]:
+                break
+
+            time.sleep(interval)
+
+        if info.status in [TaskStatus.FAILED, TaskStatus.CANCELED]:
+            raise TaskFailedError(info.status)

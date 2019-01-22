@@ -1,6 +1,10 @@
 from datetime import datetime
 
-class NodeInfo:
+class JsonResponse:
+    def __str__(self):
+        return str({key: value for key, value in self.__dict__.items() if not key.startswith("__")})
+
+class NodeInfo(JsonResponse):
     """Information about a node
     
     Args:
@@ -24,7 +28,7 @@ class NodeInfo:
         self.odm_version = json['odmVersion']
 
 
-class NodeOption:
+class NodeOption(JsonResponse):
     """A node option available to be passed to a node.
 
     Args:
@@ -42,7 +46,7 @@ class NodeOption:
         self.type = type
 
 
-class TaskInfo:
+class TaskInfo(JsonResponse):
     """Task information
 
     Args:

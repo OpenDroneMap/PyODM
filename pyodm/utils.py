@@ -1,3 +1,5 @@
+import json
+
 from requests_toolbelt.multipart import encoder
 from requests.packages.urllib3.fields import RequestField
 
@@ -42,3 +44,16 @@ class MultipartEncoder(encoder.MultipartEncoder):
                              headers=file_headers)
         field.make_multipart(content_type=file_type)
         yield field
+
+
+def options_to_json(options):
+    """Convert a dictionary of options {k1: v1, k2: v2, ...} to a JSON
+    string suitable for passing as an argument to the NodeODM API.
+
+    Args:
+        options: options for example {'orthophoto-resolution': 3, ...}
+
+    Returns:
+        str: JSON options
+    """
+    return json.dumps([{'name': k, 'value': options[k]} for k in options])
