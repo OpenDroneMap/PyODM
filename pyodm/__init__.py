@@ -1,5 +1,5 @@
 """
-PyODM is a library for easily creating orthophotos, DEMs, 3D models and point clouds from images aerial images via the `NodeODM API`_. It is an official `OpenDroneMap`_ project.
+PyODM is a library for easily creating orthophotos, DEMs, 3D models and point clouds from aerial images via the `NodeODM API`_. It's an official `OpenDroneMap`_ project.
 
 Installation:
 -------------
@@ -9,12 +9,6 @@ Installation:
 Simple usage:
 -------------
 
-To run these examples, start a new NodeODM node via:
-
-``docker run -ti -p 3000:3000 opendronemap/nodeodm``
-
-Then:
-
    >>> import os
    >>> from pyodm import Node
    >>> n = Node('localhost', 3000)
@@ -22,6 +16,10 @@ Then:
    >>> task.wait_for_completion()
    >>> os.listdir(task.download_assets("results"))
    ['odm_orthophoto', 'odm_dem', 'images.json', 'odm_georeferencing', 'odm_texturing', 'dsm_tiles', 'dtm_tiles', 'orthophoto_tiles', 'potree_pointcloud']
+
+To test these examples you need to start a NodeODM node via:
+
+``docker run -ti -p 3000:3000 opendronemap/nodeodm``
 
 Code Samples:
 -------------
