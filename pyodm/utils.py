@@ -1,4 +1,4 @@
-import json
+import json, os, threading
 
 from requests_toolbelt.multipart import encoder
 from requests.packages.urllib3.fields import RequestField
@@ -57,3 +57,19 @@ def options_to_json(options):
         str: JSON options
     """
     return json.dumps([{'name': k, 'value': options[k]} for k in options])
+
+
+
+class AtomicCounter:
+    """Atomic, thread-safe counter."""
+
+    def __init__(self, val=0):
+        """Initialize a new atomic counter to given initial value (default 0)."""
+        self.value = val
+        self.lock = threading.Lock()
+
+    def increment(self, val=1):
+        """Atomically increment the counter return the new value."""
+        with self.lock:
+            self.value += val
+            return self.value
