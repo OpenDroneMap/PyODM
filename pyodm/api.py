@@ -207,6 +207,8 @@ class Node:
         >>> info = t.info()
         >>> info.status
         <TaskStatus.RUNNING: 20>
+        >>> info.last_error
+        ''
         >>> t.info().images_count
         2
         >>> t.output()[0:2]

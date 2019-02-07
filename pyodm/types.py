@@ -55,6 +55,7 @@ class TaskInfo(JsonResponse):
         date_created (datetime): Creation date and time
         processing_time (int): Milliseconds that have elapsed since the start of processing, or -1 if no information is available.
         status (:func:`pyodm.types.TaskStatus`): status (running, queued, etc.)
+        last_error (str): if the task fails, this will be set to a string representing the last error that occured, otherwise it's an empty string.
         options (dict): options used for this task
         images_count (int): Number of images (+ GCP file)
     """
@@ -64,6 +65,7 @@ class TaskInfo(JsonResponse):
         self.date_created = datetime.utcfromtimestamp(int(json['dateCreated'] / 1000.0))
         self.processing_time = json['processingTime']
         self.status = TaskStatus(json['status']['code'])
+        self.last_error = json['status'].get('errorMessage', '')
         self.options = json['options']
         self.images_count = json['imagesCount']
 
