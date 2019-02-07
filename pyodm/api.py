@@ -615,7 +615,7 @@ class Task:
 
         return zip_path
 
-    def download_assets(self, destination, progress_callback=None):
+    def download_assets(self, destination, progress_callback=None, parallel_downloads=16, parallel_chunks_size=10):
         """Download this task's assets to a directory.
 
         Args:
@@ -624,7 +624,7 @@ class Task:
         Returns:
             str: path to saved assets
         """
-        zip_path = self.download_zip(destination, progress_callback=progress_callback)
+        zip_path = self.download_zip(destination, progress_callback=progress_callback, parallel_downloads=parallel_downloads, parallel_chunks_size=parallel_chunks_size)
         with zipfile.ZipFile(zip_path, "r") as zip_h:
             zip_h.extractall(destination)
             os.remove(zip_path)
