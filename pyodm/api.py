@@ -123,7 +123,10 @@ class Node:
                 raise NodeServerError("Unexpected status code: %s" % res.status_code)
 
             if "Content-Type" in res.headers and "application/json" in res.headers['Content-Type']:
-                return res.json()
+                result = res.json()
+                if 'error' in result:
+                    raise NodeResponseError(result['error'])
+                return result
             else:
                 return res
         except json.decoder.JSONDecodeError as e:
@@ -141,7 +144,10 @@ class Node:
                 raise NodeServerError(res.status_code)
 
             if "Content-Type" in res.headers and "application/json" in res.headers['Content-Type']:
-                return res.json()
+                result = res.json()
+                if 'error' in result:
+                    raise NodeResponseError(result['error'])
+                return result
             else:
                 return res
         except json.decoder.JSONDecodeError as e:
