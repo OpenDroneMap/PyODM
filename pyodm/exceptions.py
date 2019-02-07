@@ -18,3 +18,7 @@ class NodeResponseError(OdmError):
 class TaskFailedError(OdmError):
     """A task did not complete successfully."""
     pass
+
+class RangeNotAvailableError(OdmError):
+    """A download attempt to use Range requests failed."""
+    pass

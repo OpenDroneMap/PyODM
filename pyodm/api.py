@@ -3,6 +3,10 @@ API
 ======
 """
 import zipfile
+import queue
+import threading
+import datetime
+import math
 
 import requests
 import mimetypes
@@ -19,8 +23,8 @@ import time
 from urllib3.exceptions import ReadTimeoutError
 
 from pyodm.types import NodeOption, NodeInfo, TaskInfo, TaskStatus
-from .exceptions import NodeConnectionError, NodeResponseError, NodeServerError, TaskFailedError
-from .utils import MultipartEncoder, options_to_json
+from pyodm.exceptions import NodeConnectionError, NodeResponseError, NodeServerError, TaskFailedError, OdmError, RangeNotAvailableError
+from pyodm.utils import MultipartEncoder, options_to_json, AtomicCounter
 from requests_toolbelt.multipart import encoder
 
 
@@ -66,6 +70,32 @@ class Node:
 
         return Node(u.hostname, port, token, timeout)
 
+    @staticmethod
+    def compare_version(node_version, compare_version):
+        # Compare two NodeODM versions
+        # -1 = node version lower than compare
+        # 0 = equal
+        # 1 = node version higher than compare
+        if node_version is None or len(node_version) < 3:
+            return -1
+        
+        if node_version == compare_version:
+            return 0
+
+        try:
+            (n_major, n_minor, n_build) = map(int, node_version.split("."))
+            (c_major, c_minor, c_build) = map(int, compare_version.split("."))
+        except:
+            return -1
+
+        n_number = 1000000 * n_major + 1000 * n_minor + n_build       
+        c_number = 1000000 * c_major + 1000 * c_minor + c_build
+
+        if n_number < c_number:
+            return -1
+        else:
+            return 1
+
     def url(self, url, query={}):
         """Get a URL relative to this node.
 
@@ -89,8 +119,8 @@ class Node:
             res = requests.get(self.url(url, query), timeout=self.timeout, **kwargs)
             if res.status_code == 401:
                 raise NodeResponseError("Unauthorized. Do you need to set a token?")
-            elif res.status_code != 200 and res.status_code != 403:
-                raise NodeServerError(res.status_code)
+            elif not res.status_code in [200, 403, 206]:
+                raise NodeServerError("Unexpected status code: %s" % res.status_code)
 
             if "Content-Type" in res.headers and "application/json" in res.headers['Content-Type']:
                 return res.json()
@@ -101,7 +131,7 @@ class Node:
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             raise NodeConnectionError(str(e))
 
-    def post(self, url, data, headers={}):
+    def post(self, url, data=None, headers={}):
         try:
             res = requests.post(self.url(url), data=data, headers=headers, timeout=self.timeout)
 
@@ -125,7 +155,7 @@ class Node:
 
         >>> n = Node('localhost', 3000)
         >>> n.info().version
-        '1.3.1'
+        '1.4.0'
 
         Returns:
             :func:`~pyodm.types.NodeInfo`
@@ -146,7 +176,28 @@ class Node:
         """
         return list(map(lambda o: NodeOption(**o), self.get('/options')))
 
-    def create_task(self, files, options={}, name=None, progress_callback=None):
+    def version_greater_or_equal_than(self, version):
+        """Checks whether this node version is greater than or equal than
+        a certain version number.
+
+        >>> n = Node('localhost', 3000)
+        >>> n.version_greater_or_equal_than('1.3.1')
+        True
+        >>> n.version_greater_or_equal_than('10.5.1')
+        False
+
+        Args:
+            version (str): version number to compare
+        
+        Returns:
+            bool: result of comparison.
+        """
+
+        node_version = self.info().version
+        return self.compare_version(node_version, version) >= 0
+
+
+    def create_task(self, files, options={}, name=None, progress_callback=None, skip_post_processing=False, webhook=None, parallel_uploads=10, max_retries=5, retry_timeout=5):
         """Start processing a new task.
         At a minimum you need to pass a list of image paths. All other parameters are optional.
 
@@ -167,10 +218,129 @@ class Node:
             options (dict): options to use, for example {'orthophoto-resolution': 3, ...}
             name (str): name for the task
             progress_callback (function): callback reporting upload progress percentage
-
+            skip_post_processing  (bool): When true, skips generation of map tiles, derivate assets, point cloud tiles.
+            webhook (str): Optional URL to call when processing has ended (either successfully or unsuccessfully).
+            parallel_uploads (int): Number of parallel uploads.
+            max_retries (int): Number of attempts to make before giving up on a file upload.
+            retry_timeout (int): Wait at least these many seconds before attempting to upload a file a second time, multiplied by the retry number.
         Returns:
             :func:`~Task`
         """
+        if not self.version_greater_or_equal_than("1.4.0"):
+            return self.create_task_fallback(files, options, name, progress_callback)
+        
+        if len(files) == 0:
+            raise NodeResponseError("Not enough images")
+
+        fields = {
+            'name': name,
+            'options': options_to_json(options),
+        }
+
+        if skip_post_processing:
+            fields['skipPostProcessing'] = True
+        
+        if webhook is not None:
+            fields['webhook'] = webhook
+
+        e = MultipartEncoder(fields=fields)
+
+        result = self.post('/task/new/init', data=e, headers={'Content-Type': e.content_type})
+        if isinstance(result, dict) and 'error' in result:
+            raise NodeResponseError(result['error'])
+        
+        if isinstance(result, dict) and 'uuid' in result:
+            uuid = result['uuid']
+            uploaded_files = AtomicCounter(0)
+            error = None
+
+            # Equivalent as passing the open file descriptor, since requests
+            # eventually calls read(), but this way we make sure to close
+            # the file prior to reading the next, so we don't run into open file OS limits
+            def read_file(file_path):
+                with open(file_path, 'rb') as f:
+                    return f.read()
+
+            # Upload
+            def worker():
+                nonlocal error, uploaded_files
+
+                while True:
+                    task = q.get()
+                    if task is None or error is not None:
+                        q.task_done()
+                        break
+                    
+                    # Upload file
+                    if task['wait_until'] > datetime.datetime.now():
+                        time.sleep((task['wait_until'] - datetime.datetime.now()).seconds)
+
+                    try:
+                        file = task['file']
+                        fields = {
+                            'images': [(os.path.basename(file), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
+                        }
+
+                        e = MultipartEncoder(fields=fields)
+                        result = self.post('/task/new/upload/{}'.format(uuid), data=e, headers={'Content-Type': e.content_type})
+
+                        if isinstance(result, dict) and 'success' in result and result['success']:
+                            uf = uploaded_files.increment()
+                            if progress_callback is not None:
+                                progress_callback(100.0 * uf / len(files))
+                        else:
+                            if isinstance(result, dict) and 'error' in result:
+                                raise NodeResponseError(result['error'])
+                            else:
+                                raise NodeServerError("Failed upload with unexpected result: %s" % str(result))
+                    except OdmError as e:
+                        if task['retries'] < max_retries:
+                            # Put task back in queue
+                            task['retries'] += 1
+                            task['wait_until'] = datetime.datetime.now() + datetime.timedelta(seconds=task['retries'] * retry_timeout)
+                            q.put(task)
+                        else:
+                            error = e
+                    except Exception as e:
+                        error = e
+                    finally:
+                        q.task_done()
+
+
+            q = queue.Queue()
+            threads = []
+            for i in range(parallel_uploads):
+                t = threading.Thread(target=worker)
+                t.start()
+                threads.append(t)
+
+            now = datetime.datetime.now()
+            for file in files:
+                q.put({
+                    'file': file,
+                    'wait_until': now,
+                    'retries': 0
+                })
+
+            # block until all tasks are done
+            q.join()
+
+            # stop workers
+            for i in range(parallel_uploads):
+                q.put(None)
+            for t in threads:
+                t.join()
+
+            if error is not None:
+                raise error
+
+            result = self.post('/task/new/commit/{}'.format(uuid))
+            return self.handle_task_new_response(result)
+        else:
+            raise NodeServerError("Invalid response from /task/new/init: %s" % result)
+
+    def create_task_fallback(self, files, options={}, name=None, progress_callback=None):
+        # Pre chunked API create task implementation, used as fallback
         if len(files) == 0:
             raise NodeResponseError("Not enough images")
 
@@ -200,16 +370,14 @@ class Node:
         e = MultipartEncoder(fields=fields)
         m = encoder.MultipartEncoderMonitor(e, create_callback(e))
 
-        try:
-            result = self.post('/task/new', data=m, headers={'Content-Type': m.content_type})
-        except (json.decoder.JSONDecodeError, simplejson.JSONDecodeError) as e:
-            raise NodeServerError(str(e))
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            raise NodeConnectionError(e)
+        result = self.post('/task/new', data=m, headers={'Content-Type': m.content_type})
 
-        if 'uuid' in result:
+        return self.handle_task_new_response(result)
+
+    def handle_task_new_response(self, result):
+        if isinstance(result, dict) and 'uuid' in result:
             return Task(self, result['uuid'])
-        elif 'error' in result:
+        elif isinstance(result, dict) and 'error' in result:
             raise NodeResponseError(result['error'])
         else:
             raise NodeServerError('Invalid response: ' + str(result))
@@ -300,12 +468,14 @@ class Task:
         if options is not None: data['options'] = options_to_json(options)
         return getattr(self.post('/task/restart', data), 'success', False)
 
-    def download_zip(self, destination, progress_callback=None):
+    def download_zip(self, destination, progress_callback=None, parallel_downloads=16, parallel_chunks_size=10):
         """Download this task's assets archive to a directory.
 
         Args:
             destination (str): directory where to download assets archive. If the directory does not exist, it will be created.
-            progress_callback (function): an optional callback with one parameter, the download progress percentage
+            progress_callback (function): an optional callback with one parameter, the download progress percentage.
+            parallel_downloads (int): maximum number of parallel downloads if the resource supports http range.
+            parallel_chunks_size (int) size in MB of chunks for parallel downloads
         Returns:
             str: path to archive file (.zip)
         """
@@ -318,22 +488,128 @@ class Task:
 
         try:
             download_stream = self.get('/task/{}/download/all.zip'.format(self.uuid), stream=True)
+            headers = download_stream.headers
+            
             zip_path = os.path.join(destination, "{}_{}_all.zip".format(self.uuid, int(time.time())))
 
             # Keep track of download progress (if possible)
             content_length = download_stream.headers.get('content-length')
             total_length = int(content_length) if content_length is not None else None
             downloaded = 0
+            chunk_size = int(parallel_chunks_size * 1024 * 1024)
+            use_fallback = False
+            accept_ranges = headers.get('accept-ranges')
 
-            with open(zip_path, 'wb') as fd:
+            # Can we do parallel downloads?
+            if accept_ranges is not None and accept_ranges.lower() == 'bytes' and total_length is not None and total_length > chunk_size and parallel_downloads > 1:
+                num_chunks = math.ceil(total_length / chunk_size)
+                completed_chunks = AtomicCounter(0)
+                num_workers = parallel_downloads
+                error = None
+                merge_chunks = [False] * num_chunks
 
-                for chunk in download_stream.iter_content(4096):
-                    downloaded += len(chunk)
+                def merge():
+                    nonlocal error
+                    current_chunk = 0
 
+                    with open(zip_path, "wb") as out_file:
+                        while current_chunk < num_chunks and error is None:
+                            if merge_chunks[current_chunk]:
+                                chunk_file = "%s.part%s" % (zip_path, current_chunk)
+                                with open(chunk_file, "rb") as fd:
+                                    out_file.write(fd.read())
+
+                                os.unlink(chunk_file)
+                                
+                                current_chunk += 1
+                            else:
+                                time.sleep(0.1)
+
+                def worker():
+                    nonlocal error, completed_chunks, merge_chunks
+
+                    while True:
+                        task = q.get()
+                        part_num, bytes_range = task
+                        if bytes_range is None or error is not None:
+                            q.task_done()
+                            break
+
+                        try:
+                            # Download chunk
+                            res = self.get('/task/{}/download/all.zip'.format(self.uuid), stream=True, headers={'Range': 'bytes=%s-%s' % bytes_range})
+                            if res.status_code == 206:
+                                with open("%s.part%s" % (zip_path, part_num), 'wb') as fd:
+                                    for chunk in res.iter_content(4096):
+                                        fd.write(chunk)
+                                    
+                                with completed_chunks.lock:
+                                    completed_chunks.value += 1
+
+                                    if progress_callback is not None:
+                                        progress_callback(100.0 * completed_chunks.value / num_chunks)
+                            
+                                merge_chunks[part_num] = True
+                            else:
+                                error = RangeNotAvailableError()
+                        except OdmError as e:
+                            time.sleep(5)
+                            q.put((part_num, bytes_range))
+                        except Exception as e:
+                            error = e
+                        finally:
+                            q.task_done()
+
+                q = queue.PriorityQueue()
+                threads = []
+                for i in range(num_workers):
+                    t = threading.Thread(target=worker)
+                    t.start()
+                    threads.append(t)
+
+                merge_thread = threading.Thread(target=merge)
+                merge_thread.start()
+
+                range_start = 0
+
+                for i in range(num_chunks):
+                    range_end = min(range_start + chunk_size - 1, total_length - 1)
+                    q.put((i, (range_start, range_end)))
+                    range_start = range_end + 1
+
+                # block until all tasks are done
+                q.join()
+
+                # stop workers
+                for i in range(len(threads)):
+                    q.put((-1, None))
+                for t in threads:
+                    t.join()
+                
+                merge_thread.join()
+
+                if error is not None:
+                    if isinstance(error, RangeNotAvailableError):
+                        use_fallback = True
+                    else:
+                        raise error
+            else:
+                use_fallback = True
+
+            if use_fallback:
+                # Single connection, boring download
+                with open(zip_path, 'wb') as fd:
+                    for chunk in download_stream.iter_content(4096):
+                        downloaded += len(chunk)
+
+                        if progress_callback is not None and total_length is not None:
+                            progress_callback((100.0 * float(downloaded) / total_length))
+
+                        fd.write(chunk)
+                    
                     if progress_callback is not None:
-                        progress_callback((100.0 * float(downloaded) / total_length))
+                        progress_callback(100)
 
-                    fd.write(chunk)
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, ReadTimeoutError) as e:
             raise NodeConnectionError(e)
 

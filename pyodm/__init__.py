@@ -14,8 +14,8 @@ Simple usage:
    >>> n = Node('localhost', 3000)
    >>> task = n.create_task(['examples/images/image_1.jpg', 'examples/images/image_2.jpg'], {'dsm': True})
    >>> task.wait_for_completion()
-   >>> os.listdir(task.download_assets("results"))
-   ['odm_orthophoto', 'odm_dem', 'images.json', 'odm_georeferencing', 'odm_texturing', 'dsm_tiles', 'dtm_tiles', 'orthophoto_tiles', 'potree_pointcloud']
+   >>> os.listdir(task.download_assets("results"))[0:2]
+   ['odm_orthophoto', 'odm_dem']
 
 To test these examples you need to start a NodeODM node via:
 
