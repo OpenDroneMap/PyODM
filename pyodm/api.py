@@ -453,7 +453,7 @@ class Task:
         Returns:
             bool: task was canceled or not
         """
-        return getattr(self.post('/task/cancel', {'uuid': self.uuid}), 'success', False)
+        return self.post('/task/cancel', {'uuid': self.uuid}).get('success', False)
 
     def remove(self):
         """Remove this task.
@@ -461,7 +461,7 @@ class Task:
         Returns:
             bool: task was removed or not
         """
-        return getattr(self.post('/task/remove', {'uuid': self.uuid}), 'success', False)
+        return self.post('/task/remove', {'uuid': self.uuid}).get('success', False)
 
     def restart(self, options=None):
         """Restart this task.
@@ -474,7 +474,7 @@ class Task:
         """
         data = {'uuid': self.uuid}
         if options is not None: data['options'] = options_to_json(options)
-        return getattr(self.post('/task/restart', data), 'success', False)
+        return self.post('/task/restart', data).get('success', False)
 
     def download_zip(self, destination, progress_callback=None, parallel_downloads=16, parallel_chunks_size=10):
         """Download this task's assets archive to a directory.
