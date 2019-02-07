@@ -6,6 +6,7 @@ import zipfile
 import queue
 import threading
 import datetime
+import math
 
 import requests
 import mimetypes
@@ -22,8 +23,8 @@ import time
 from urllib3.exceptions import ReadTimeoutError
 
 from pyodm.types import NodeOption, NodeInfo, TaskInfo, TaskStatus
-from .exceptions import NodeConnectionError, NodeResponseError, NodeServerError, TaskFailedError, OdmError
-from .utils import MultipartEncoder, options_to_json, AtomicCounter
+from pyodm.exceptions import NodeConnectionError, NodeResponseError, NodeServerError, TaskFailedError, OdmError, RangeNotAvailableError
+from pyodm.utils import MultipartEncoder, options_to_json, AtomicCounter
 from requests_toolbelt.multipart import encoder
 
 
@@ -118,8 +119,8 @@ class Node:
             res = requests.get(self.url(url, query), timeout=self.timeout, **kwargs)
             if res.status_code == 401:
                 raise NodeResponseError("Unauthorized. Do you need to set a token?")
-            elif res.status_code != 200 and res.status_code != 403:
-                raise NodeServerError(res.status_code)
+            elif not res.status_code in [200, 403, 206]:
+                raise NodeServerError("Unexpected status code: %s" % res.status_code)
 
             if "Content-Type" in res.headers and "application/json" in res.headers['Content-Type']:
                 return res.json()
@@ -281,13 +282,7 @@ class Node:
                         }
 
                         e = MultipartEncoder(fields=fields)
-
-                        try:
-                            result = self.post('/task/new/upload/{}'.format(uuid), data=e, headers={'Content-Type': e.content_type})
-                        except (json.decoder.JSONDecodeError, json.JSONDecodeError) as e:
-                            raise NodeServerError(str(e))
-                        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                            raise NodeConnectionError(e)
+                        result = self.post('/task/new/upload/{}'.format(uuid), data=e, headers={'Content-Type': e.content_type})
 
                         if isinstance(result, dict) and 'success' in result and result['success']:
                             uf = uploaded_files.increment()
@@ -375,12 +370,7 @@ class Node:
         e = MultipartEncoder(fields=fields)
         m = encoder.MultipartEncoderMonitor(e, create_callback(e))
 
-        try:
-            result = self.post('/task/new', data=m, headers={'Content-Type': m.content_type})
-        except (json.decoder.JSONDecodeError, json.JSONDecodeError) as e:
-            raise NodeServerError(str(e))
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            raise NodeConnectionError(e)
+        result = self.post('/task/new', data=m, headers={'Content-Type': m.content_type})
 
         return self.handle_task_new_response(result)
 
@@ -478,12 +468,14 @@ class Task:
         if options is not None: data['options'] = options_to_json(options)
         return getattr(self.post('/task/restart', data), 'success', False)
 
-    def download_zip(self, destination, progress_callback=None):
+    def download_zip(self, destination, progress_callback=None, parallel_downloads=16, parallel_chunks_size=10):
         """Download this task's assets archive to a directory.
 
         Args:
             destination (str): directory where to download assets archive. If the directory does not exist, it will be created.
-            progress_callback (function): an optional callback with one parameter, the download progress percentage
+            progress_callback (function): an optional callback with one parameter, the download progress percentage.
+            parallel_downloads (int): maximum number of parallel downloads if the resource supports http range.
+            parallel_chunks_size (int) size in MB of chunks for parallel downloads
         Returns:
             str: path to archive file (.zip)
         """
@@ -496,22 +488,128 @@ class Task:
 
         try:
             download_stream = self.get('/task/{}/download/all.zip'.format(self.uuid), stream=True)
+            headers = download_stream.headers
+            
             zip_path = os.path.join(destination, "{}_{}_all.zip".format(self.uuid, int(time.time())))
 
             # Keep track of download progress (if possible)
             content_length = download_stream.headers.get('content-length')
             total_length = int(content_length) if content_length is not None else None
             downloaded = 0
+            chunk_size = int(parallel_chunks_size * 1024 * 1024)
+            use_fallback = False
+            accept_ranges = headers.get('accept-ranges')
 
-            with open(zip_path, 'wb') as fd:
+            # Can we do parallel downloads?
+            if accept_ranges is not None and accept_ranges.lower() == 'bytes' and total_length is not None and total_length > chunk_size and parallel_downloads > 1:
+                num_chunks = math.ceil(total_length / chunk_size)
+                completed_chunks = AtomicCounter(0)
+                num_workers = parallel_downloads
+                error = None
+                merge_chunks = [False] * num_chunks
 
-                for chunk in download_stream.iter_content(4096):
-                    downloaded += len(chunk)
+                def merge():
+                    nonlocal error
+                    current_chunk = 0
 
+                    with open(zip_path, "wb") as out_file:
+                        while current_chunk < num_chunks and error is None:
+                            if merge_chunks[current_chunk]:
+                                chunk_file = "%s.part%s" % (zip_path, current_chunk)
+                                with open(chunk_file, "rb") as fd:
+                                    out_file.write(fd.read())
+
+                                os.unlink(chunk_file)
+                                
+                                current_chunk += 1
+                            else:
+                                time.sleep(0.1)
+
+                def worker():
+                    nonlocal error, completed_chunks, merge_chunks
+
+                    while True:
+                        task = q.get()
+                        part_num, bytes_range = task
+                        if bytes_range is None or error is not None:
+                            q.task_done()
+                            break
+
+                        try:
+                            # Download chunk
+                            res = self.get('/task/{}/download/all.zip'.format(self.uuid), stream=True, headers={'Range': 'bytes=%s-%s' % bytes_range})
+                            if res.status_code == 206:
+                                with open("%s.part%s" % (zip_path, part_num), 'wb') as fd:
+                                    for chunk in res.iter_content(4096):
+                                        fd.write(chunk)
+                                    
+                                with completed_chunks.lock:
+                                    completed_chunks.value += 1
+
+                                    if progress_callback is not None:
+                                        progress_callback(100.0 * completed_chunks.value / num_chunks)
+                            
+                                merge_chunks[part_num] = True
+                            else:
+                                error = RangeNotAvailableError()
+                        except OdmError as e:
+                            time.sleep(5)
+                            q.put((part_num, bytes_range))
+                        except Exception as e:
+                            error = e
+                        finally:
+                            q.task_done()
+
+                q = queue.PriorityQueue()
+                threads = []
+                for i in range(num_workers):
+                    t = threading.Thread(target=worker)
+                    t.start()
+                    threads.append(t)
+
+                merge_thread = threading.Thread(target=merge)
+                merge_thread.start()
+
+                range_start = 0
+
+                for i in range(num_chunks):
+                    range_end = min(range_start + chunk_size - 1, total_length - 1)
+                    q.put((i, (range_start, range_end)))
+                    range_start = range_end + 1
+
+                # block until all tasks are done
+                q.join()
+
+                # stop workers
+                for i in range(len(threads)):
+                    q.put((-1, None))
+                for t in threads:
+                    t.join()
+                
+                merge_thread.join()
+
+                if error is not None:
+                    if isinstance(error, RangeNotAvailableError):
+                        use_fallback = True
+                    else:
+                        raise error
+            else:
+                use_fallback = True
+
+            if use_fallback:
+                # Single connection, boring download
+                with open(zip_path, 'wb') as fd:
+                    for chunk in download_stream.iter_content(4096):
+                        downloaded += len(chunk)
+
+                        if progress_callback is not None and total_length is not None:
+                            progress_callback((100.0 * float(downloaded) / total_length))
+
+                        fd.write(chunk)
+                    
                     if progress_callback is not None:
-                        progress_callback((100.0 * float(downloaded) / total_length))
+                        progress_callback(100)
 
-                    fd.write(chunk)
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, ReadTimeoutError) as e:
             raise NodeConnectionError(e)
 
