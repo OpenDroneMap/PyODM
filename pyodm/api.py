@@ -482,8 +482,8 @@ class Task:
         Args:
             destination (str): directory where to download assets archive. If the directory does not exist, it will be created.
             progress_callback (function): an optional callback with one parameter, the download progress percentage.
-            parallel_downloads (int): maximum number of parallel downloads if the resource supports http range.
-            parallel_chunks_size (int) size in MB of chunks for parallel downloads
+            parallel_downloads (int): maximum number of parallel downloads if the node supports http range.
+            parallel_chunks_size (int): size in MB of chunks for parallel downloads
         Returns:
             str: path to archive file (.zip)
         """
@@ -629,8 +629,8 @@ class Task:
         Args:
             destination (str): directory where to download assets. If the directory does not exist, it will be created.
             progress_callback (function): an optional callback with one parameter, the download progress percentage
-            parallel_downloads (int): maximum number of parallel downloads if the resource supports http range.
-            parallel_chunks_size (int) size in MB of chunks for parallel downloads
+            parallel_downloads (int): maximum number of parallel downloads if the node supports http range.
+            parallel_chunks_size (int): size in MB of chunks for parallel downloads
         Returns:
             str: path to saved assets
         """
