@@ -13,19 +13,19 @@ class NodeInfo(JsonResponse):
         total_memory (int): Amount of total RAM in the system in bytes
         available_memory (int): Amount of RAM available in bytes
         cpu_cores (int): Number of virtual CPU cores
-        max_images (int): Maximum number of images allowed for new tasks or null if there’s no limit.
+        max_images (int): Maximum number of images allowed for new tasks or None if there’s no limit.
         max_parallel_tasks (int): Maximum number of tasks that can be processed simultaneously
         odm_version (str): Current version of ODM
     """
     def __init__(self, json):
-        self.version = json['version']
-        self.task_queue_count = json['taskQueueCount']
-        self.total_memory = json['totalMemory']
-        self.available_memory = json['availableMemory']
-        self.cpu_cores = json['cpuCores']
-        self.max_images = json['maxImages']
-        self.max_parallel_tasks = json['maxParallelTasks']
-        self.odm_version = json['odmVersion']
+        self.version = json.get('version', '?')
+        self.task_queue_count = json.get('taskQueueCount')
+        self.total_memory = json.get('totalMemory')
+        self.available_memory = json.get('availableMemory')
+        self.cpu_cores = json.get('cpuCores')
+        self.max_images = json.get('maxImages')
+        self.max_parallel_tasks = json.get('maxParallelTasks')
+        self.odm_version = json.get('odmVersion', '?')
 
 
 class NodeOption(JsonResponse):
@@ -55,6 +55,7 @@ class TaskInfo(JsonResponse):
         date_created (datetime): Creation date and time
         processing_time (int): Milliseconds that have elapsed since the start of processing, or -1 if no information is available.
         status (:func:`pyodm.types.TaskStatus`): status (running, queued, etc.)
+        last_error (str): if the task fails, this will be set to a string representing the last error that occured, otherwise it's an empty string.
         options (dict): options used for this task
         images_count (int): Number of images (+ GCP file)
     """
@@ -64,6 +65,7 @@ class TaskInfo(JsonResponse):
         self.date_created = datetime.utcfromtimestamp(int(json['dateCreated'] / 1000.0))
         self.processing_time = json['processingTime']
         self.status = TaskStatus(json['status']['code'])
+        self.last_error = json['status'].get('errorMessage', '')
         self.options = json['options']
         self.images_count = json['imagesCount']
 

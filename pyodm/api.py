@@ -123,7 +123,10 @@ class Node:
                 raise NodeServerError("Unexpected status code: %s" % res.status_code)
 
             if "Content-Type" in res.headers and "application/json" in res.headers['Content-Type']:
-                return res.json()
+                result = res.json()
+                if 'error' in result:
+                    raise NodeResponseError(result['error'])
+                return result
             else:
                 return res
         except json.decoder.JSONDecodeError as e:
@@ -141,7 +144,10 @@ class Node:
                 raise NodeServerError(res.status_code)
 
             if "Content-Type" in res.headers and "application/json" in res.headers['Content-Type']:
-                return res.json()
+                result = res.json()
+                if 'error' in result:
+                    raise NodeResponseError(result['error'])
+                return result
             else:
                 return res
         except json.decoder.JSONDecodeError as e:
@@ -207,6 +213,8 @@ class Node:
         >>> info = t.info()
         >>> info.status
         <TaskStatus.RUNNING: 20>
+        >>> info.last_error
+        ''
         >>> t.info().images_count
         2
         >>> t.output()[0:2]
@@ -445,7 +453,7 @@ class Task:
         Returns:
             bool: task was canceled or not
         """
-        return getattr(self.post('/task/cancel', {'uuid': self.uuid}), 'success', False)
+        return self.post('/task/cancel', {'uuid': self.uuid}).get('success', False)
 
     def remove(self):
         """Remove this task.
@@ -453,7 +461,7 @@ class Task:
         Returns:
             bool: task was removed or not
         """
-        return getattr(self.post('/task/remove', {'uuid': self.uuid}), 'success', False)
+        return self.post('/task/remove', {'uuid': self.uuid}).get('success', False)
 
     def restart(self, options=None):
         """Restart this task.
@@ -466,7 +474,7 @@ class Task:
         """
         data = {'uuid': self.uuid}
         if options is not None: data['options'] = options_to_json(options)
-        return getattr(self.post('/task/restart', data), 'success', False)
+        return self.post('/task/restart', data).get('success', False)
 
     def download_zip(self, destination, progress_callback=None, parallel_downloads=16, parallel_chunks_size=10):
         """Download this task's assets archive to a directory.
@@ -615,16 +623,18 @@ class Task:
 
         return zip_path
 
-    def download_assets(self, destination, progress_callback=None):
+    def download_assets(self, destination, progress_callback=None, parallel_downloads=16, parallel_chunks_size=10):
         """Download this task's assets to a directory.
 
         Args:
             destination (str): directory where to download assets. If the directory does not exist, it will be created.
             progress_callback (function): an optional callback with one parameter, the download progress percentage
+            parallel_downloads (int): maximum number of parallel downloads if the resource supports http range.
+            parallel_chunks_size (int) size in MB of chunks for parallel downloads
         Returns:
             str: path to saved assets
         """
-        zip_path = self.download_zip(destination, progress_callback=progress_callback)
+        zip_path = self.download_zip(destination, progress_callback=progress_callback, parallel_downloads=parallel_downloads, parallel_chunks_size=parallel_chunks_size)
         with zipfile.ZipFile(zip_path, "r") as zip_h:
             zip_h.extractall(destination)
             os.remove(zip_path)
