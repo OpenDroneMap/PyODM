@@ -209,7 +209,7 @@ class Node:
         return self.compare_version(node_version, version) >= 0
 
 
-    def create_task(self, files, options={}, name=None, progress_callback=None, skip_post_processing=False, webhook=None, parallel_uploads=10, max_retries=5, retry_timeout=5):
+    def create_task(self, files, options={}, name=None, progress_callback=None, skip_post_processing=False, webhook=None, outputs=[], parallel_uploads=10, max_retries=5, retry_timeout=5):
         """Start processing a new task.
         At a minimum you need to pass a list of image paths. All other parameters are optional.
 
@@ -234,6 +234,7 @@ class Node:
             progress_callback (function): callback reporting upload progress percentage
             skip_post_processing  (bool): When true, skips generation of map tiles, derivate assets, point cloud tiles.
             webhook (str): Optional URL to call when processing has ended (either successfully or unsuccessfully).
+            outputs (list): Optional paths relative to the project directory that should be included in the all.zip result file, overriding the default behavior.
             parallel_uploads (int): Number of parallel uploads.
             max_retries (int): Number of attempts to make before giving up on a file upload.
             retry_timeout (int): Wait at least these many seconds before attempting to upload a file a second time, multiplied by the retry number.
@@ -256,6 +257,9 @@ class Node:
         
         if webhook is not None:
             fields['webhook'] = webhook
+
+        if outputs:
+            fields['outputs'] = json.dumps(outputs)
 
         e = MultipartEncoder(fields=fields)
 
