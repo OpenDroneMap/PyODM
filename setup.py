@@ -3,6 +3,14 @@ import setuptools
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+INSTALL_REQUIRES=[
+    'requests',
+    'requests_toolbelt',
+    'urllib3',
+]
+if sys.version_info[0] < 3:
+    INSTALL_REQUIRES.append("simplejson>=2.1.0")
+
 setuptools.setup(
     name="pyodm",
     version="1.5.0",
@@ -18,9 +26,5 @@ setuptools.setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
     ],
-    install_requires=[
-        'requests',
-        'requests_toolbelt',
-        'urllib3',
-    ]
+    install_requires=INSTALL_REQUIRES
 )
