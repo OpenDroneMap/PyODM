@@ -4,9 +4,9 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 INSTALL_REQUIRES=[
-    'requests',
-    'requests_toolbelt',
-    'urllib3',
+    'requests==2.21.0',
+    'requests_toolbelt==0.9.1',
+    'urllib3==1.24.1',
 ]
 if sys.version_info[0] < 3:
     INSTALL_REQUIRES.append("simplejson>=2.1.0")
