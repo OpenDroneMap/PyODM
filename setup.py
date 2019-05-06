@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pyodm",
-    version="1.4.0",
+    version="1.5.0",
     author="OpenDroneMap Contributors",
     author_email="pt@masseranolabs.com",
     description="Python SDK for OpenDroneMap",
