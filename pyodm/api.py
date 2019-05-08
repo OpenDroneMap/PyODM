@@ -650,7 +650,7 @@ class Task:
 
         return destination
 
-    def wait_for_completion(self, status_callback=None, interval=3):
+    def wait_for_completion(self, status_callback=None, interval=3, max_retries=5, retry_timeout=5):
         """Wait for the task to complete. The call will block until the task status has become
         :func:`~TaskStatus.COMPLETED`. If the status is set to :func:`~TaskStatus.CANCELED` or :func:`~TaskStatus.FAILED`
         it raises a TaskFailedError exception.
@@ -658,10 +658,23 @@ class Task:
         Args:
             status_callback (function): optional callback that will be called with task info updates every interval seconds.
             interval (int): seconds between status checks.
+            max_retries (int): number of repeated attempts that should be made to receive a status update before giving up.
+            retry_timeout (int): wait N*retry_timeout between attempts, where N is the attempt number.
         """
-        while True:
-            info = self.info()
+        retry = 0
 
+        while True:
+            try:
+                info = self.info()
+            except NodeConnectionError as e:
+                if retry < max_retries:
+                    retry += 1
+                    time.sleep(retry * retry_timeout)
+                    continue
+                else:
+                    raise e
+
+            retry = 0
             if status_callback is not None:
                 status_callback(info)
 
