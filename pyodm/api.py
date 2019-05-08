@@ -253,7 +253,7 @@ class Node:
         }
 
         if skip_post_processing:
-            fields['skipPostProcessing'] = True
+            fields['skipPostProcessing'] = 'true'
         
         if webhook is not None:
             fields['webhook'] = webhook
