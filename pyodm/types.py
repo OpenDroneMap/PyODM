@@ -13,7 +13,7 @@ class NodeInfo(JsonResponse):
         total_memory (int): Amount of total RAM in the system in bytes
         available_memory (int): Amount of RAM available in bytes
         cpu_cores (int): Number of virtual CPU cores
-        max_images (int): Maximum number of images allowed for new tasks or None if there’s no limit.
+        max_images (int): Maximum number of images allowed for new tasks or None if there's no limit.
         max_parallel_tasks (int): Maximum number of tasks that can be processed simultaneously
         odm_version (str): Current version of ODM
     """
@@ -75,7 +75,7 @@ class TaskStatus(Enum):
     """Task status
 
     Args:
-        QUEUED: Task’s files have been uploaded and are waiting to be processed.
+        QUEUED: Task's files have been uploaded and are waiting to be processed.
         RUNNING: Task is currently being processed.
         FAILED:	Task has failed for some reason (not enough images, out of memory, etc.
         COMPLETED: Task has completed. Assets are be ready to be downloaded.

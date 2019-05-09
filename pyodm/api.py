@@ -3,16 +3,22 @@ API
 ======
 """
 import zipfile
-import queue
+try:
+    import queue
+except ImportError:
+    import Queue as queue
 import threading
 import datetime
 import math
 
 import requests
 import mimetypes
-import json
 import os
-from urllib.parse import urlunparse, urlencode, urlparse, parse_qs
+try:
+    from urllib.parse import urlunparse, urlencode, urlparse, parse_qs
+except ImportError:
+    from urllib import urlencode
+    from urlparse import urlunparse, urlparse, parse_qs
 
 try:
     import simplejson as json
@@ -161,7 +167,7 @@ class Node:
 
         >>> n = Node('localhost', 3000)
         >>> n.info().version
-        '1.4.0'
+        '1.5.0'
 
         Returns:
             :func:`~pyodm.types.NodeInfo`
@@ -203,7 +209,7 @@ class Node:
         return self.compare_version(node_version, version) >= 0
 
 
-    def create_task(self, files, options={}, name=None, progress_callback=None, skip_post_processing=False, webhook=None, parallel_uploads=10, max_retries=5, retry_timeout=5):
+    def create_task(self, files, options={}, name=None, progress_callback=None, skip_post_processing=False, webhook=None, outputs=[], parallel_uploads=10, max_retries=5, retry_timeout=5):
         """Start processing a new task.
         At a minimum you need to pass a list of image paths. All other parameters are optional.
 
@@ -228,6 +234,7 @@ class Node:
             progress_callback (function): callback reporting upload progress percentage
             skip_post_processing  (bool): When true, skips generation of map tiles, derivate assets, point cloud tiles.
             webhook (str): Optional URL to call when processing has ended (either successfully or unsuccessfully).
+            outputs (list): Optional paths relative to the project directory that should be included in the all.zip result file, overriding the default behavior.
             parallel_uploads (int): Number of parallel uploads.
             max_retries (int): Number of attempts to make before giving up on a file upload.
             retry_timeout (int): Wait at least these many seconds before attempting to upload a file a second time, multiplied by the retry number.
@@ -246,10 +253,13 @@ class Node:
         }
 
         if skip_post_processing:
-            fields['skipPostProcessing'] = True
+            fields['skipPostProcessing'] = 'true'
         
         if webhook is not None:
             fields['webhook'] = webhook
+
+        if outputs:
+            fields['outputs'] = json.dumps(outputs)
 
         e = MultipartEncoder(fields=fields)
 
@@ -259,8 +269,10 @@ class Node:
         
         if isinstance(result, dict) and 'uuid' in result:
             uuid = result['uuid']
-            uploaded_files = AtomicCounter(0)
-            error = None
+
+            class nonloc:
+                uploaded_files = AtomicCounter(0)
+                error = None
 
             # Equivalent as passing the open file descriptor, since requests
             # eventually calls read(), but this way we make sure to close
@@ -271,11 +283,9 @@ class Node:
 
             # Upload
             def worker():
-                nonlocal error, uploaded_files
-
                 while True:
                     task = q.get()
-                    if task is None or error is not None:
+                    if task is None or nonloc.error is not None:
                         q.task_done()
                         break
                     
@@ -293,7 +303,7 @@ class Node:
                         result = self.post('/task/new/upload/{}'.format(uuid), data=e, headers={'Content-Type': e.content_type})
 
                         if isinstance(result, dict) and 'success' in result and result['success']:
-                            uf = uploaded_files.increment()
+                            uf = nonloc.uploaded_files.increment()
                             if progress_callback is not None:
                                 progress_callback(100.0 * uf / len(files))
                         else:
@@ -308,9 +318,9 @@ class Node:
                             task['wait_until'] = datetime.datetime.now() + datetime.timedelta(seconds=task['retries'] * retry_timeout)
                             q.put(task)
                         else:
-                            error = e
+                            nonloc.error = e
                     except Exception as e:
-                        error = e
+                        nonloc.error = e
                     finally:
                         q.task_done()
 
@@ -339,8 +349,8 @@ class Node:
             for t in threads:
                 t.join()
 
-            if error is not None:
-                raise error
+            if nonloc.error is not None:
+                raise nonloc.error
 
             result = self.post('/task/new/commit/{}'.format(uuid))
             return self.handle_task_new_response(result)
@@ -511,18 +521,19 @@ class Task:
             # Can we do parallel downloads?
             if accept_ranges is not None and accept_ranges.lower() == 'bytes' and total_length is not None and total_length > chunk_size and parallel_downloads > 1:
                 num_chunks = math.ceil(total_length / chunk_size)
-                completed_chunks = AtomicCounter(0)
                 num_workers = parallel_downloads
-                error = None
-                merge_chunks = [False] * num_chunks
+
+                class nonloc:
+                    completed_chunks = AtomicCounter(0)
+                    merge_chunks = [False] * num_chunks
+                    error = None
 
                 def merge():
-                    nonlocal error
                     current_chunk = 0
 
                     with open(zip_path, "wb") as out_file:
-                        while current_chunk < num_chunks and error is None:
-                            if merge_chunks[current_chunk]:
+                        while current_chunk < num_chunks and nonloc.error is None:
+                            if nonloc.merge_chunks[current_chunk]:
                                 chunk_file = "%s.part%s" % (zip_path, current_chunk)
                                 with open(chunk_file, "rb") as fd:
                                     out_file.write(fd.read())
@@ -534,12 +545,10 @@ class Task:
                                 time.sleep(0.1)
 
                 def worker():
-                    nonlocal error, completed_chunks, merge_chunks
-
                     while True:
                         task = q.get()
                         part_num, bytes_range = task
-                        if bytes_range is None or error is not None:
+                        if bytes_range is None or nonloc.error is not None:
                             q.task_done()
                             break
 
@@ -551,20 +560,20 @@ class Task:
                                     for chunk in res.iter_content(4096):
                                         fd.write(chunk)
                                     
-                                with completed_chunks.lock:
-                                    completed_chunks.value += 1
+                                with nonloc.completed_chunks.lock:
+                                    nonloc.completed_chunks.value += 1
 
                                     if progress_callback is not None:
-                                        progress_callback(100.0 * completed_chunks.value / num_chunks)
+                                        progress_callback(100.0 * nonloc.completed_chunks.value / num_chunks)
                             
-                                merge_chunks[part_num] = True
+                                nonloc.merge_chunks[part_num] = True
                             else:
-                                error = RangeNotAvailableError()
+                                nonloc.error = RangeNotAvailableError()
                         except OdmError as e:
                             time.sleep(5)
                             q.put((part_num, bytes_range))
                         except Exception as e:
-                            error = e
+                            nonloc.error = e
                         finally:
                             q.task_done()
 
@@ -596,11 +605,11 @@ class Task:
                 
                 merge_thread.join()
 
-                if error is not None:
-                    if isinstance(error, RangeNotAvailableError):
+                if nonloc.error is not None:
+                    if isinstance(nonloc.error, RangeNotAvailableError):
                         use_fallback = True
                     else:
-                        raise error
+                        raise nonloc.error
             else:
                 use_fallback = True
 
@@ -641,7 +650,7 @@ class Task:
 
         return destination
 
-    def wait_for_completion(self, status_callback=None, interval=3):
+    def wait_for_completion(self, status_callback=None, interval=3, max_retries=5, retry_timeout=5):
         """Wait for the task to complete. The call will block until the task status has become
         :func:`~TaskStatus.COMPLETED`. If the status is set to :func:`~TaskStatus.CANCELED` or :func:`~TaskStatus.FAILED`
         it raises a TaskFailedError exception.
@@ -649,10 +658,23 @@ class Task:
         Args:
             status_callback (function): optional callback that will be called with task info updates every interval seconds.
             interval (int): seconds between status checks.
+            max_retries (int): number of repeated attempts that should be made to receive a status update before giving up.
+            retry_timeout (int): wait N*retry_timeout between attempts, where N is the attempt number.
         """
-        while True:
-            info = self.info()
+        retry = 0
 
+        while True:
+            try:
+                info = self.info()
+            except NodeConnectionError as e:
+                if retry < max_retries:
+                    retry += 1
+                    time.sleep(retry * retry_timeout)
+                    continue
+                else:
+                    raise e
+
+            retry = 0
             if status_callback is not None:
                 status_callback(info)
 
