@@ -167,7 +167,7 @@ class Node:
 
         >>> n = Node('localhost', 3000)
         >>> n.info().version
-        '1.4.0'
+        '1.5.0'
 
         Returns:
             :func:`~pyodm.types.NodeInfo`
