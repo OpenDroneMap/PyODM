@@ -167,7 +167,9 @@ class Node:
 
         >>> n = Node('localhost', 3000)
         >>> n.info().version
-        '1.5.0'
+        '1.5.1'
+        >>> n.info().engine
+        'odm'
 
         Returns:
             :func:`~pyodm.types.NodeInfo`
@@ -225,7 +227,6 @@ class Node:
         2
         >>> t.output()[0:2]
         ['DJI_0131.JPG - DJI_0313.JPG has 1 candidate matches', 'DJI_0131.JPG - DJI_0177.JPG has 3 candidate matches']
-
 
         Args:
             files (list): list of image paths + optional GCP file path.
@@ -438,13 +439,17 @@ class Task:
             raise NodeResponseError(result['error'])
         return result
 
-    def info(self):
+    def info(self, with_output=None):
         """Retrieves information about this task.
 
         Returns:
             :func:`~pyodm.types.TaskInfo`
         """
-        return TaskInfo(self.get('/task/{}/info'.format(self.uuid)))
+        query = {}
+        if with_output is not None:
+            query['with_output'] = with_output
+
+        return TaskInfo(self.get('/task/{}/info'.format(self.uuid), query))
 
     def output(self, line=0):
         """Retrieve console task output.

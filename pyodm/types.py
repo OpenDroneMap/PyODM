@@ -15,7 +15,9 @@ class NodeInfo(JsonResponse):
         cpu_cores (int): Number of virtual CPU cores
         max_images (int): Maximum number of images allowed for new tasks or None if there's no limit.
         max_parallel_tasks (int): Maximum number of tasks that can be processed simultaneously
-        odm_version (str): Current version of ODM
+        odm_version (str): Current version of ODM (deprecated, use engine_version instead)
+        engine (str): Lowercase identifier of the engine (odm, micmac, ...)
+        engine_version (str): Current engine version
     """
     def __init__(self, json):
         self.version = json.get('version', '?')
@@ -25,7 +27,16 @@ class NodeInfo(JsonResponse):
         self.cpu_cores = json.get('cpuCores')
         self.max_images = json.get('maxImages')
         self.max_parallel_tasks = json.get('maxParallelTasks')
+        self.engine = json.get('engine', '?')
+        self.engine_version = json.get('engineVersion', '?')
+        
+        # Deprecated
         self.odm_version = json.get('odmVersion', '?')
+
+        # Guess
+        if self.engine_version == '?' and self.odm_version != '?':
+            self.engine = 'odm'
+            self.engine_version = self.odm_version
 
 
 class NodeOption(JsonResponse):
@@ -58,6 +69,8 @@ class TaskInfo(JsonResponse):
         last_error (str): if the task fails, this will be set to a string representing the last error that occured, otherwise it's an empty string.
         options (dict): options used for this task
         images_count (int): Number of images (+ GCP file)
+        progress (float): Percentage progress (estimated) of the task
+        output ([str]): Optional console output (one list item per row). This is populated only if the with_output parameter is passed to info().
     """
     def __init__(self, json):
         self.uuid = json['uuid']
@@ -68,6 +81,8 @@ class TaskInfo(JsonResponse):
         self.last_error = json['status'].get('errorMessage', '')
         self.options = json['options']
         self.images_count = json['imagesCount']
+        self.progress = json.get('progress', 0)
+        self.output = json.get('output', [])
 
 
 from enum import Enum
