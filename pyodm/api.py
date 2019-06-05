@@ -167,7 +167,7 @@ class Node:
 
         >>> n = Node('localhost', 3000)
         >>> n.info().version
-        '1.5.1'
+        '1.5.2'
         >>> n.info().engine
         'odm'
 
@@ -182,8 +182,6 @@ class Node:
         >>> n = Node('localhost', 3000)
         >>> n.options()[0].name
         'pc-classify'
-        >>> n.options()[0].domain
-        ['none', 'smrf', 'pmf']
 
         Returns:
             list: [:func:`~pyodm.types.NodeOption`]
