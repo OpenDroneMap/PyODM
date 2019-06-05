@@ -167,7 +167,7 @@ class Node:
 
         >>> n = Node('localhost', 3000)
         >>> n.info().version
-        '1.5.1'
+        '1.5.2'
         >>> n.info().engine
         'odm'
 
@@ -182,8 +182,6 @@ class Node:
         >>> n = Node('localhost', 3000)
         >>> n.options()[0].name
         'pc-classify'
-        >>> n.options()[0].domain
-        ['none', 'smrf', 'pmf']
 
         Returns:
             list: [:func:`~pyodm.types.NodeOption`]
@@ -525,7 +523,7 @@ class Task:
 
             # Can we do parallel downloads?
             if accept_ranges is not None and accept_ranges.lower() == 'bytes' and total_length is not None and total_length > chunk_size and parallel_downloads > 1:
-                num_chunks = math.ceil(total_length / chunk_size)
+                num_chunks = int(math.ceil(total_length / chunk_size))
                 num_workers = parallel_downloads
 
                 class nonloc:
