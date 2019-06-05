@@ -523,7 +523,7 @@ class Task:
 
             # Can we do parallel downloads?
             if accept_ranges is not None and accept_ranges.lower() == 'bytes' and total_length is not None and total_length > chunk_size and parallel_downloads > 1:
-                num_chunks = int(math.ceil(total_length / chunk_size))
+                num_chunks = int(math.ceil(total_length / float(chunk_size)))
                 num_workers = parallel_downloads
 
                 class nonloc:
