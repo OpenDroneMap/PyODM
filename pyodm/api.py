@@ -167,7 +167,7 @@ class Node:
 
         >>> n = Node('localhost', 3000)
         >>> n.info().version
-        '1.5.2'
+        '1.5.3'
         >>> n.info().engine
         'odm'
 
@@ -268,6 +268,7 @@ class Node:
         
         if isinstance(result, dict) and 'uuid' in result:
             uuid = result['uuid']
+            progress_event = None
 
             class nonloc:
                 uploaded_files = AtomicCounter(0)
@@ -303,8 +304,8 @@ class Node:
 
                         if isinstance(result, dict) and 'success' in result and result['success']:
                             uf = nonloc.uploaded_files.increment()
-                            if progress_callback is not None:
-                                progress_callback(100.0 * uf / len(files))
+                            if progress_event is not None:
+                                progress_event.set()
                         else:
                             if isinstance(result, dict) and 'error' in result:
                                 raise NodeResponseError(result['error'])
@@ -331,6 +332,9 @@ class Node:
                 t.start()
                 threads.append(t)
 
+            if progress_callback is not None:
+                progress_event = threading.Event()
+
             now = datetime.datetime.now()
             for file in files:
                 q.put({
@@ -338,6 +342,21 @@ class Node:
                     'wait_until': now,
                     'retries': 0
                 })
+            
+            # Wait for progress updates
+            if progress_event is not None:
+                current_progress = 0
+                while not q.empty():
+                    if progress_event.wait(0.1):
+                        progress_event.clear()
+                        current_progress = 100.0 * nonloc.uploaded_files.value / len(files)
+                        progress_callback(current_progress)
+                    if nonloc.error is not None:
+                        break
+                
+                # Make sure to report 100% complete
+                if current_progress != 100 and nonloc.error is None:
+                    progress_callback(100.0)
 
             # block until all tasks are done
             q.join()
@@ -627,9 +646,6 @@ class Task:
 
                         fd.write(chunk)
                     
-                    if progress_callback is not None:
-                        progress_callback(100)
-
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, ReadTimeoutError) as e:
             raise NodeConnectionError(e)
 
