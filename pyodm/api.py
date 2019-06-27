@@ -363,9 +363,10 @@ class Node:
                         progress_callback(100.0)
                     except Exception as e:
                         nonloc.error = e
-                        
+
             # block until all tasks are done
-            q.join()
+            if nonloc.error is None:
+                q.join()
 
             # stop workers
             for i in range(parallel_uploads):
