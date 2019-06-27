@@ -350,16 +350,23 @@ class Node:
                     if progress_event.wait(0.1):
                         progress_event.clear()
                         current_progress = 100.0 * nonloc.uploaded_files.value / len(files)
-                        progress_callback(current_progress)
+                        try:
+                            progress_callback(current_progress)
+                        except Exception as e:
+                            nonloc.error = e
                     if nonloc.error is not None:
                         break
                 
                 # Make sure to report 100% complete
                 if current_progress != 100 and nonloc.error is None:
-                    progress_callback(100.0)
+                    try:
+                        progress_callback(100.0)
+                    except Exception as e:
+                        nonloc.error = e
 
             # block until all tasks are done
-            q.join()
+            if nonloc.error is None:
+                q.join()
 
             # stop workers
             for i in range(parallel_uploads):
