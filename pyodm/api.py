@@ -14,6 +14,8 @@ import math
 import requests
 import mimetypes
 import os
+import pathlib
+import uuid
 try:
     from urllib.parse import urlunparse, urlencode, urlparse, parse_qs
 except ImportError:
@@ -295,8 +297,11 @@ class Node:
 
                     try:
                         file = task['file']
+                        extension = pathlib.Path(file).suffix
+                        uuid = uuid.uuid4()
+                        rand_filename = uuid + extension
                         fields = {
-                            'images': [(os.path.basename(file), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
+                            'images': [rand_filename, read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
                         }
 
                         e = MultipartEncoder(fields=fields)
