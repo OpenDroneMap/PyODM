@@ -297,11 +297,8 @@ class Node:
 
                     try:
                         file = task['file']
-                        extension = pathlib.Path(file).suffix
-                        uuid = uuid.uuid4()
-                        rand_filename = uuid + extension
                         fields = {
-                            'images': [rand_filename, read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
+                            'images': [uuid.uuid4() + pathlib.Path(file).suffix, read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
                         }
 
                         e = MultipartEncoder(fields=fields)
