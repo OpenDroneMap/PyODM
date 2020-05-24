@@ -397,8 +397,11 @@ class Node:
         # eventually calls read(), but this way we make sure to close
         # the file prior to reading the next, so we don't run into open file OS limits
         def read_file(file_path):
-            with open(file_path, 'rb') as f:
-                return f.read()
+            if Node.prefixHttp.match(file_path) or Node.prefixHttps.match(file_path):
+                return requests.get(file_path).content
+            else:
+                with open(file_path, 'rb') as f:
+                    return f.read()
 
         fields = {
             'name': name,
