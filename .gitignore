@@ -102,3 +102,6 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# Ignore Mac DS_Store files
+**/.DS_Store
