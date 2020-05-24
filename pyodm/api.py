@@ -14,6 +14,7 @@ import math
 import requests
 import mimetypes
 import os
+import re
 try:
     from urllib.parse import urlunparse, urlencode, urlparse, parse_qs
 except ImportError:
@@ -43,6 +44,8 @@ class Node:
             token (str): token to use for authentication
             timeout (int): timeout value in seconds for network requests
     """
+    prefixHttp = re.compile('http:', re.I)
+    prefixHttps = re.compile('https:', re.I)
 
     def __init__(self, host, port, token="", timeout=30):
         self.host = host
@@ -278,8 +281,11 @@ class Node:
             # eventually calls read(), but this way we make sure to close
             # the file prior to reading the next, so we don't run into open file OS limits
             def read_file(file_path):
-                with open(file_path, 'rb') as f:
-                    return f.read()
+                if Node.prefixHttp.match(file_path) or Node.prefixHttps.match(file_path):
+                    return requests.get(file_path).content
+                else:
+                    with open(file_path, 'rb') as f:
+                        return f.read()
 
             # Upload
             def worker():
@@ -391,8 +397,11 @@ class Node:
         # eventually calls read(), but this way we make sure to close
         # the file prior to reading the next, so we don't run into open file OS limits
         def read_file(file_path):
-            with open(file_path, 'rb') as f:
-                return f.read()
+            if Node.prefixHttp.match(file_path) or Node.prefixHttps.match(file_path):
+                return requests.get(file_path).content
+            else:
+                with open(file_path, 'rb') as f:
+                    return f.read()
 
         fields = {
             'name': name,
