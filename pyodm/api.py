@@ -633,7 +633,8 @@ class Task:
                     range_start = range_end + 1
 
                 # block until all tasks are done
-                q.join()
+                while not q.empty() and nonloc.error is None:
+                    time.sleep(0.1)
 
                 # stop workers
                 for i in range(len(threads)):
