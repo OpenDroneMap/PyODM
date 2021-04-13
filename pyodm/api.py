@@ -587,9 +587,12 @@ class Task:
                             if res.status_code == 206:
                                 with open("%s.part%s" % (zip_path, part_num), 'wb') as fd:
                                     bytes_written = 0
-                                    for chunk in res.iter_content(4096):
-                                        bytes_written += fd.write(chunk)
-
+                                    try:
+                                        for chunk in res.iter_content(4096):
+                                            bytes_written += fd.write(chunk)
+                                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                                        raise NodeConnectionError(str(e))
+                                    
                                     if bytes_written != (bytes_range[1] - bytes_range[0] + 1):
                                         # Process again
                                         q.put((part_num, bytes_range))
