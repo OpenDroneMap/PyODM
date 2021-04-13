@@ -242,6 +242,8 @@ class Node:
             retry_timeout (int): Wait at least these many seconds before attempting to upload a file a second time, multiplied by the retry number.
         Returns:
             :func:`~Task`
+        Throws:
+            :func:`~OdmError`, may have an attribute set to the task UUID. (Use `exception.hasattr("uuid")` to check).
         """
         if not self.version_greater_or_equal_than("1.4.0"):
             return self.create_task_fallback(files, options, name, progress_callback)
@@ -270,121 +272,125 @@ class Node:
             raise NodeResponseError(result['error'])
         
         if isinstance(result, dict) and 'uuid' in result:
-            uuid = result['uuid']
-            progress_event = None
+            try:
+                uuid = result['uuid']
+                progress_event = None
 
-            class nonloc:
-                uploaded_files = AtomicCounter(0)
-                error = None
+                class nonloc:
+                    uploaded_files = AtomicCounter(0)
+                    error = None
 
-            # Equivalent as passing the open file descriptor, since requests
-            # eventually calls read(), but this way we make sure to close
-            # the file prior to reading the next, so we don't run into open file OS limits
-            def read_file(file_path):
-                if Node.prefixHttp.match(file_path) or Node.prefixHttps.match(file_path):
-                    return requests.get(file_path).content
-                else:
-                    with open(file_path, 'rb') as f:
-                        return f.read()
+                # Equivalent as passing the open file descriptor, since requests
+                # eventually calls read(), but this way we make sure to close
+                # the file prior to reading the next, so we don't run into open file OS limits
+                def read_file(file_path):
+                    if Node.prefixHttp.match(file_path) or Node.prefixHttps.match(file_path):
+                        return requests.get(file_path).content
+                    else:
+                        with open(file_path, 'rb') as f:
+                            return f.read()
 
-            # Upload
-            def worker():
-                while True:
-                    task = q.get()
-                    if task is None or nonloc.error is not None:
-                        q.task_done()
-                        break
-                    
-                    # Upload file
-                    if task['wait_until'] > datetime.datetime.now():
-                        time.sleep((task['wait_until'] - datetime.datetime.now()).seconds)
+                # Upload
+                def worker():
+                    while True:
+                        task = q.get()
+                        if task is None or nonloc.error is not None:
+                            q.task_done()
+                            break
 
-                    try:
-                        file = task['file']
-                        fields = {
-                            'images': [(os.path.basename(file), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
-                        }
+                        # Upload file
+                        if task['wait_until'] > datetime.datetime.now():
+                            time.sleep((task['wait_until'] - datetime.datetime.now()).seconds)
 
-                        e = MultipartEncoder(fields=fields)
-                        result = self.post('/task/new/upload/{}'.format(uuid), data=e, headers={'Content-Type': e.content_type})
-
-                        if isinstance(result, dict) and 'success' in result and result['success']:
-                            uf = nonloc.uploaded_files.increment()
-                            if progress_event is not None:
-                                progress_event.set()
-                        else:
-                            if isinstance(result, dict) and 'error' in result:
-                                raise NodeResponseError(result['error'])
-                            else:
-                                raise NodeServerError("Failed upload with unexpected result: %s" % str(result))
-                    except OdmError as e:
-                        if task['retries'] < max_retries:
-                            # Put task back in queue
-                            task['retries'] += 1
-                            task['wait_until'] = datetime.datetime.now() + datetime.timedelta(seconds=task['retries'] * retry_timeout)
-                            q.put(task)
-                        else:
-                            nonloc.error = e
-                    except Exception as e:
-                        nonloc.error = e
-                    finally:
-                        q.task_done()
-
-
-            q = queue.Queue()
-            threads = []
-            for i in range(parallel_uploads):
-                t = threading.Thread(target=worker)
-                t.start()
-                threads.append(t)
-
-            if progress_callback is not None:
-                progress_event = threading.Event()
-
-            now = datetime.datetime.now()
-            for file in files:
-                q.put({
-                    'file': file,
-                    'wait_until': now,
-                    'retries': 0
-                })
-            
-            # Wait for progress updates
-            if progress_event is not None:
-                current_progress = 0
-                while not q.empty():
-                    if progress_event.wait(0.1):
-                        progress_event.clear()
-                        current_progress = 100.0 * nonloc.uploaded_files.value / len(files)
                         try:
-                            progress_callback(current_progress)
+                            file = task['file']
+                            fields = {
+                                'images': [(os.path.basename(file), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
+                            }
+
+                            e = MultipartEncoder(fields=fields)
+                            result = self.post('/task/new/upload/{}'.format(uuid), data=e, headers={'Content-Type': e.content_type})
+
+                            if isinstance(result, dict) and 'success' in result and result['success']:
+                                uf = nonloc.uploaded_files.increment()
+                                if progress_event is not None:
+                                    progress_event.set()
+                            else:
+                                if isinstance(result, dict) and 'error' in result:
+                                    raise NodeResponseError(result['error'])
+                                else:
+                                    raise NodeServerError("Failed upload with unexpected result: %s" % str(result))
+                        except OdmError as e:
+                            if task['retries'] < max_retries:
+                                # Put task back in queue
+                                task['retries'] += 1
+                                task['wait_until'] = datetime.datetime.now() + datetime.timedelta(seconds=task['retries'] * retry_timeout)
+                                q.put(task)
+                            else:
+                                nonloc.error = e
                         except Exception as e:
                             nonloc.error = e
-                    if nonloc.error is not None:
-                        break
-                
-                # Make sure to report 100% complete
-                if current_progress != 100 and nonloc.error is None:
-                    try:
-                        progress_callback(100.0)
-                    except Exception as e:
-                        nonloc.error = e
+                        finally:
+                            q.task_done()
 
-            # block until all tasks are done
-            if nonloc.error is None:
-                q.join()
 
-            # stop workers
-            for i in range(parallel_uploads):
-                q.put(None)
-            for t in threads:
-                t.join()
+                q = queue.Queue()
+                threads = []
+                for i in range(parallel_uploads):
+                    t = threading.Thread(target=worker)
+                    t.start()
+                    threads.append(t)
 
-            if nonloc.error is not None:
-                raise nonloc.error
+                if progress_callback is not None:
+                    progress_event = threading.Event()
 
-            result = self.post('/task/new/commit/{}'.format(uuid))
-            return self.handle_task_new_response(result)
+                now = datetime.datetime.now()
+                for file in files:
+                    q.put({
+                        'file': file,
+                        'wait_until': now,
+                        'retries': 0
+                    })
+
+                # Wait for progress updates
+                if progress_event is not None:
+                    current_progress = 0
+                    while not q.empty():
+                        if progress_event.wait(0.1):
+                            progress_event.clear()
+                            current_progress = 100.0 * nonloc.uploaded_files.value / len(files)
+                            try:
+                                progress_callback(current_progress)
+                            except Exception as e:
+                                nonloc.error = e
+                        if nonloc.error is not None:
+                            break
+
+                    # Make sure to report 100% complete
+                    if current_progress != 100 and nonloc.error is None:
+                        try:
+                            progress_callback(100.0)
+                        except Exception as e:
+                            nonloc.error = e
+
+                # block until all tasks are done
+                if nonloc.error is None:
+                    q.join()
+
+                # stop workers
+                for i in range(parallel_uploads):
+                    q.put(None)
+                for t in threads:
+                    t.join()
+
+                if nonloc.error is not None:
+                    raise nonloc.error
+
+                result = self.post('/task/new/commit/{}'.format(uuid))
+                return self.handle_task_new_response(result)
+            except OdmError as e:
+                e.uuid = uuid
+                raise e
         else:
             raise NodeServerError("Invalid response from /task/new/init: %s" % result)
 
