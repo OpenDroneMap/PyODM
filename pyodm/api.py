@@ -596,9 +596,12 @@ class Task:
                             if res.status_code == 206:
                                 with open("%s.part%s" % (zip_path, part_num), 'wb') as fd:
                                     bytes_written = 0
-                                    for chunk in res.iter_content(4096):
-                                        bytes_written += fd.write(chunk)
-
+                                    try:
+                                        for chunk in res.iter_content(4096):
+                                            bytes_written += fd.write(chunk)
+                                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                                        raise NodeConnectionError(str(e))
+                                    
                                     if bytes_written != (bytes_range[1] - bytes_range[0] + 1):
                                         # Process again
                                         q.put((part_num, bytes_range))
@@ -639,7 +642,8 @@ class Task:
                     range_start = range_end + 1
 
                 # block until all tasks are done
-                q.join()
+                while not q.empty() and nonloc.error is None:
+                    time.sleep(0.1)
 
                 # stop workers
                 for i in range(len(threads)):
