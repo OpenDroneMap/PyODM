@@ -14,7 +14,7 @@ if sys.version_info[0] < 3:
 
 setuptools.setup(
     name="pyodm",
-    version="1.5.5",
+    version="1.5.6",
     author="OpenDroneMap Contributors",
     author_email="pt@uav4geo.com",
     description="Python SDK for OpenDroneMap",
