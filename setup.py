@@ -5,16 +5,16 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 INSTALL_REQUIRES=[
-    'requests>=2.26.0',
-    'requests_toolbelt>=0.9.1',
-    'urllib3>=1.26.7',
+    'requests',
+    'requests_toolbelt',
+    'urllib3',
 ]
 if sys.version_info[0] < 3:
     INSTALL_REQUIRES.append("simplejson>=2.1.0")
 
 setuptools.setup(
     name="pyodm",
-    version="1.5.8",
+    version="1.5.9",
     author="OpenDroneMap Contributors",
     author_email="pt@uav4geo.com",
     description="Python SDK for OpenDroneMap",
