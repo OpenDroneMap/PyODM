@@ -318,7 +318,7 @@ class Node:
                             else:
                                 raise NodeServerError("Failed upload with unexpected result: %s" % str(result))
                     except OdmError as e:
-                        if task['retries'] < max_retries:
+                        if task['retries'] < max_retries and not (isinstance(result, dict) and 'noRetry' in result and result['noRetry']):
                             # Put task back in queue
                             task['retries'] += 1
                             task['wait_until'] = datetime.datetime.now() + datetime.timedelta(seconds=task['retries'] * retry_timeout)
