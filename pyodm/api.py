@@ -47,6 +47,8 @@ class Node:
     prefixHttp = re.compile('http:', re.I)
     prefixHttps = re.compile('https:', re.I)
 
+    presignedURL = re.compile("/?AWSAccessKeyId", re.I)
+
     def __init__(self, host, port, token="", timeout=30):
         self.host = host
         self.port = port
@@ -301,9 +303,16 @@ class Node:
 
                     try:
                         file = task['file']
-                        fields = {
-                            'images': [(os.path.basename(file), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
-                        }
+                        # Check if the object url is presigned
+                        if Node.presignedURL.search(file) is not None:
+                            # If the url is presigned
+                            fields = {
+                                'images': [(os.path.basename(file.split("?")[0]), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
+                            }
+                        else:
+                            fields = {
+                                'images': [(os.path.basename(file), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
+                            }
 
                         e = MultipartEncoder(fields=fields)
                         result = self.post('/task/new/upload/{}'.format(uuid), data=e, headers={'Content-Type': e.content_type})
