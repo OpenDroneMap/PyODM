@@ -47,7 +47,7 @@ class Node:
     prefixHttp = re.compile('http:', re.I)
     prefixHttps = re.compile('https:', re.I)
 
-    presignedURL = re.compile("/?AWSAccessKeyId", re.I)
+    presignedURL = re.compile("\.[a-z]*\?", re.I)
 
     def __init__(self, host, port, token="", timeout=30):
         self.host = host
