@@ -303,9 +303,8 @@ class Node:
 
                     try:
                         file = task['file']
-                        # Check if the object url is presigned
+                        # Check if the object url contains an access token
                         if Node.presignedURL.search(file) is not None:
-                            # If the url is presigned
                             fields = {
                                 'images': [(os.path.basename(file.split("?")[0]), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
                             }
