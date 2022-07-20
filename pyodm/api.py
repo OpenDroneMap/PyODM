@@ -47,6 +47,8 @@ class Node:
     prefixHttp = re.compile('http:', re.I)
     prefixHttps = re.compile('https:', re.I)
 
+    presignedURL = re.compile("\.[a-z]*\?", re.I)
+
     def __init__(self, host, port, token="", timeout=30):
         self.host = host
         self.port = port
@@ -301,9 +303,15 @@ class Node:
 
                     try:
                         file = task['file']
-                        fields = {
-                            'images': [(os.path.basename(file), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
-                        }
+                        # Check if the object url contains an access token
+                        if Node.presignedURL.search(file) is not None:
+                            fields = {
+                                'images': [(os.path.basename(file.split("?")[0]), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
+                            }
+                        else:
+                            fields = {
+                                'images': [(os.path.basename(file), read_file(file), (mimetypes.guess_type(file)[0] or "image/jpg"))]
+                            }
 
                         e = MultipartEncoder(fields=fields)
                         result = self.post('/task/new/upload/{}'.format(uuid), data=e, headers={'Content-Type': e.content_type})
