@@ -300,7 +300,9 @@ class Node:
                     # Upload file
                     if task['wait_until'] > datetime.datetime.now():
                         time.sleep((task['wait_until'] - datetime.datetime.now()).seconds)
-
+                    
+                    # Assign value to result, prevent UnboundLocalError
+                    result = None
                     try:
                         file = task['file']
                         # Check if the object url contains an access token
