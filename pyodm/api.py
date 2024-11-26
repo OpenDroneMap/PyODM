@@ -214,7 +214,7 @@ class Node:
         return self.compare_version(node_version, version) >= 0
 
 
-    def create_task(self, files, options={}, name=None, progress_callback=None, skip_post_processing=False, webhook=None, outputs=[], parallel_uploads=10, max_retries=5, retry_timeout=5):
+    def create_task(self, files, options={}, name=None, progress_callback=None, skip_post_processing=False, webhook=None, outputs=[], parallel_uploads=10, max_retries=5, retry_timeout=5, task_uuid=None):
         """Start processing a new task.
         At a minimum you need to pass a list of image paths. All other parameters are optional.
 
@@ -242,11 +242,12 @@ class Node:
             parallel_uploads (int): Number of parallel uploads.
             max_retries (int): Number of attempts to make before giving up on a file upload.
             retry_timeout (int): Wait at least these many seconds before attempting to upload a file a second time, multiplied by the retry number.
+            task_uuid: an optional UUID string that will be used as UUID for this task instead of generating a random one.
         Returns:
             :func:`~Task`
         """
         if not self.version_greater_or_equal_than("1.4.0"):
-            return self.create_task_fallback(files, options, name, progress_callback)
+            return self.create_task_fallback(files, options, name, progress_callback, task_uuid)
         
         if len(files) == 0:
             raise NodeResponseError("Not enough images")
@@ -266,8 +267,11 @@ class Node:
             fields['outputs'] = json.dumps(outputs)
 
         e = MultipartEncoder(fields=fields)
+        headers = {'Content-Type': e.content_type}
+        if task_uuid is not None:
+            headers['set-uuid'] = task_uuid
 
-        result = self.post('/task/new/init', data=e, headers={'Content-Type': e.content_type})
+        result = self.post('/task/new/init', data=e, headers=headers)
         if isinstance(result, dict) and 'error' in result:
             raise NodeResponseError(result['error'])
         
@@ -398,7 +402,7 @@ class Node:
         else:
             raise NodeServerError("Invalid response from /task/new/init: %s" % result)
 
-    def create_task_fallback(self, files, options={}, name=None, progress_callback=None):
+    def create_task_fallback(self, files, options={}, name=None, progress_callback=None, task_uuid=None):
         # Pre chunked API create task implementation, used as fallback
         if len(files) == 0:
             raise NodeResponseError("Not enough images")
@@ -432,7 +436,11 @@ class Node:
         e = MultipartEncoder(fields=fields)
         m = encoder.MultipartEncoderMonitor(e, create_callback(e))
 
-        result = self.post('/task/new', data=m, headers={'Content-Type': m.content_type})
+        headers = {'Content-Type': m.content_type}
+        if task_uuid is not None:
+            headers['set-uuid'] = task_uuid
+
+        result = self.post('/task/new', data=m, headers=headers)
 
         return self.handle_task_new_response(result)
 
