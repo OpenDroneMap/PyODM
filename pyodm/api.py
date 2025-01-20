@@ -709,7 +709,7 @@ class Task:
         zip_path = self.download_zip(destination, progress_callback=progress_callback, parallel_downloads=parallel_downloads, parallel_chunks_size=parallel_chunks_size)
         with zipfile.ZipFile(zip_path, "r") as zip_h:
             zip_h.extractall(destination)
-            os.remove(zip_path)
+        os.remove(zip_path)
 
         return destination
 
